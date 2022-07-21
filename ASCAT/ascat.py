@@ -1,7 +1,6 @@
 # Methods for loading and parsing the ascat data set into a dataframe
 #
 
-import pytorch_lightning as pl
 from sklearn import preprocessing
 from sklearn.model_selection import train_test_split as sk_split
 import numpy as np
@@ -10,7 +9,6 @@ import os
 import re
 from tqdm import tqdm
 
-pl.seed_everything(42)
 
 FILE_PATH = os.path.dirname(os.path.realpath(__file__))
 DATA_PATH = FILE_PATH + r'/ascat/ReleasedData/TCGA_SNP6_hg19'
