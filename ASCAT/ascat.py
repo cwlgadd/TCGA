@@ -9,7 +9,6 @@ import os
 import re
 from tqdm import tqdm
 
-
 FILE_PATH = os.path.dirname(os.path.realpath(__file__))
 DATA_PATH = FILE_PATH + r'/ascat/ReleasedData/TCGA_SNP6_hg19'
 

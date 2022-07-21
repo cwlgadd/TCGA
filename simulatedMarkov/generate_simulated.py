@@ -1,14 +1,9 @@
 # Methods for loading and parsing the simulated version of the ascat dataset into a dataframe
 #
-
-import copy
 from sklearn import preprocessing
 from sklearn.model_selection import train_test_split as sk_split
 import numpy as np
 import pandas as pd
-
-# import os
-# FILE_PATH = os.path.dirname(os.path.realpath(__file__))
 
 
 class SimulateMarkov:
@@ -109,7 +104,7 @@ class SimulateMarkov:
         return frame
 
 
-def example():
+def example_generator():
 
     # Create class instance
     data_generator = SimulateMarkov()
@@ -138,5 +133,5 @@ def example():
 
 if __name__ == '__main__':
 
-    frame, (df_train, df_val, df_test), _, le, _ = example()
+    frame, (df_train, df_val, df_test), _, le, _ = example_generator()
     print(frame.head())
