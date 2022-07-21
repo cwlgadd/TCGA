@@ -1,3 +1,17 @@
-# TCGA
+# The Cancer Genome Atlas for PyTorch models
 
-Small package for loading The Cancer Genome Atlas data into PyTorch models
+Package for loading [The Cancer Genome Atlas (TCGA)](https://www.cancer.gov/about-nci/organization/ccg/research/structural-genomics/tcga) data into PyTorch models 
+
+## Data modules
+- Simulated. 
+  - We simulate from a Markov Process, where each transition belongs to one of a pre-determined set.
+  - Whole Genome Doubling (WGD) is not included yet.
+
+
+    x
+
+- [Allele-Specific Copy number Analysis of Tumours (ASCAT)](https://www.crick.ac.uk/research/labs/peter-van-loo/software#:~:text=ASCAT%20is%20a%20tool%20to,variant%2C%20polymorphic%20in%20a%20population.).
+  - ASCAT is a tool to detect somatic copy number alterations (CNAs) in cancer samples.
+
+
+    x
