@@ -43,21 +43,19 @@ class MarkovDataModule(SimulateMarkov, pl.LightningDataModule, ABC):
                                 )
 
         self.batch_size = batch_size
-        self.training_set = None
-        self.test_set = None
-        self.validation_set = None
+        self.training_set, self.test_set, self.validation_set = None, None, None
 
+        # Run Markov Process forward
         self(steps=steps)
-
-        df = self.make_data_frame()
+        data_frame = self.make_data_frame()
 
         # Encode remaining type labels, so they can be used by the model later
         self.label_encoder = preprocessing.LabelEncoder()
-        self.label_encoder.fit_transform(df.labels.unique())
+        self.label_encoder.fit_transform(data_frame.labels.unique())
 
         # Split frame into training, validation, and test
-        self.train_df, test_df = sk_split(df, test_size=0.2)
-        self.test_df, self.val_df = sk_split(test_df, test_size=0.2)
+        self.train_df, test_df = sk_split(data_frame, test_size=0.2)
+        self.test_df, self.val_df = sk_split(data_frame, test_size=0.2)
 
     def setup(self, stage=None):
         self.training_set = MarkovDataset(self.train_df, self.label_encoder)

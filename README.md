@@ -1,6 +1,6 @@
 # The Cancer Genome Atlas for PyTorch models
 
-Package for loading [The Cancer Genome Atlas (TCGA)](https://www.cancer.gov/about-nci/organization/ccg/research/structural-genomics/tcga) data into PyTorch models 
+Package for loading [The Cancer Genome Atlas (TCGA)](https://www.cancer.gov/about-nci/organization/ccg/research/structural-genomics/tcga) data into PyTorch models. Just add to project as a submodule. 
 
 ## Data modules
 - Simulated. 

@@ -30,7 +30,7 @@ class SimulateMarkov:
     @property
     def noise_kernel(self):
         """ With some probability we perform a transition that is purely random"""
-        #TODO: not implemented
+        # TODO: not implemented
         return np.random.choice([0, 1], size=(self.length,), p=[4. / 5, 1. / 5])
 
     def __init__(self, classes=2, length=100, n=50000, n_kernels_per=30, n_kernels_shared=20, path=None):
@@ -133,5 +133,5 @@ def example_generator():
 
 if __name__ == '__main__':
 
-    frame, (df_train, df_val, df_test), _, le, _ = example_generator()
-    print(frame.head())
+    df, (df_train, df_val, df_test), _, le, _ = example_generator()
+    print(df.head())
