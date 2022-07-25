@@ -7,12 +7,12 @@ from sklearn import preprocessing
 from sklearn.model_selection import train_test_split
 import os
 from abc import ABC
-from generate_simulated import SimulateMarkov
+from .generate_simulated import SimulateMarkov
 
 pl.seed_everything(42)
 
 
-class MarkovDataModule(SimulateMarkov, pl.LightningDataModule, ABC):
+class DataModule(SimulateMarkov, pl.LightningDataModule, ABC):
     """
 
     """
@@ -30,7 +30,7 @@ class MarkovDataModule(SimulateMarkov, pl.LightningDataModule, ABC):
         @param path:                Path for saving
         @param batch_size:          Batch size to load data into model
         """
-        super(MarkovDataModule, self).__init__()
+        super(DataModule, self).__init__()
         SimulateMarkov.__init__(self,
                                 classes=classes,
                                 length=length,
@@ -55,6 +55,8 @@ class MarkovDataModule(SimulateMarkov, pl.LightningDataModule, ABC):
         self.train_df, test_df = train_test_split(data_frame, test_size=0.2)
         self.test_df, self.val_df = train_test_split(data_frame, test_size=0.2)
 
+        self.setup()
+
     def setup(self, stage=None):
         self.training_set = MarkovDataset(self.train_df, self.label_encoder)
         self.test_set = MarkovDataset(self.test_df, self.label_encoder)
@@ -62,7 +64,6 @@ class MarkovDataModule(SimulateMarkov, pl.LightningDataModule, ABC):
 
     def train_dataloader(self):
         return DataLoader(
-            sampler=None,
             dataset=self.training_set,
             batch_size=self.batch_size,
             num_workers=os.cpu_count(),
@@ -100,10 +101,9 @@ class MarkovDataset(Dataset):
         """
         self.data_frame = data
         self.label_encoder = label_encoder
-        self.n = len(self.data_frame.index)
 
     def __len__(self):
-        return self.n
+        return len(self.data_frame.index)
 
     def __getitem__(self, idx):
         if torch.is_tensor(idx):
@@ -124,8 +124,7 @@ class MarkovDataset(Dataset):
 
 def example_loader(steps=5, batch_size=256):
 
-    data_module = MarkovDataModule(steps=steps, batch_size=batch_size)
-    data_module.setup()
+    data_module = DataModule(steps=steps, batch_size=batch_size)
 
     loader_list = {'train': data_module.train_dataloader(),
                    'test': data_module.test_dataloader(),

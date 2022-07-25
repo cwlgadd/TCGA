@@ -6,13 +6,13 @@ import numpy as np
 import pandas as pd
 import os
 from abc import ABC
-from ascat import ASCAT
-from helpers import get_chr_base_pair_lengths as chr_lengths
+from .ascat import ASCAT
+from ..helpers import get_chr_base_pair_lengths
 
 pl.seed_everything(42)
 
 
-class ASCATDataModule(ASCAT, pl.LightningDataModule, ABC):
+class DataModule(ASCAT, pl.LightningDataModule, ABC):
     """
 
     """
@@ -28,7 +28,7 @@ class ASCATDataModule(ASCAT, pl.LightningDataModule, ABC):
         if file_path is None:
             file_path = os.path.dirname(os.path.abspath(__file__)) + '/ascat.pkl'
 
-        super(ASCATDataModule, self).__init__(path=file_path, cancer_types=cancer_types, wgd=wgd)
+        super(DataModule, self).__init__(path=file_path, cancer_types=cancer_types, wgd=wgd)
 
         self.batch_size = batch_size
         self.train_set, self.test_set, self.validation_set = None, None, None
@@ -94,7 +94,7 @@ class ASCATDataset(Dataset):
         Helper function to convert collections of (startpos, endpos) into down-sampled sequences. This is called during
         __getitem__ to avoid storing many large vectors.
         """
-        true_chr_lengths = chr_lengths()
+        true_chr_lengths = get_chr_base_pair_lengths()
 
         if equal_chr_length is True:
             chr_length = 10000
@@ -163,7 +163,7 @@ class ASCATDataset(Dataset):
 
 
 def main_test():
-    data_module = ASCATDataModule(wgd=['0'], cancer_types=['ACC', 'BRCA'])
+    data_module = DataModule(wgd=['0'], cancer_types=['ACC', 'BRCA'])
     print(data_module)
     print(data_module.weight_dict)
 
