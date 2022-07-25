@@ -1,15 +1,13 @@
-import logging
-
 import torch
 from torch.utils.data import Dataset, DataLoader, WeightedRandomSampler
 import pytorch_lightning as pl
 import numpy as np
 import pandas as pd
 from sklearn import preprocessing
+from sklearn.model_selection import train_test_split
 import os
 from abc import ABC
-#from experiments.configs.config import extern
-from generate_simulated import *
+from generate_simulated import SimulateMarkov
 
 pl.seed_everything(42)
 
@@ -54,8 +52,8 @@ class MarkovDataModule(SimulateMarkov, pl.LightningDataModule, ABC):
         self.label_encoder.fit_transform(data_frame.labels.unique())
 
         # Split frame into training, validation, and test
-        self.train_df, test_df = sk_split(data_frame, test_size=0.2)
-        self.test_df, self.val_df = sk_split(data_frame, test_size=0.2)
+        self.train_df, test_df = train_test_split(data_frame, test_size=0.2)
+        self.test_df, self.val_df = train_test_split(data_frame, test_size=0.2)
 
     def setup(self, stage=None):
         self.training_set = MarkovDataset(self.train_df, self.label_encoder)

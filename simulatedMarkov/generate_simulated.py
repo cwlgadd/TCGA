@@ -1,7 +1,7 @@
 # Methods for loading and parsing the simulated version of the ascat dataset into a dataframe
 #
 from sklearn import preprocessing
-from sklearn.model_selection import train_test_split as sk_split
+from sklearn.model_selection import train_test_split
 import numpy as np
 import pandas as pd
 
@@ -122,8 +122,8 @@ def example_generator():
     label_encoder.fit_transform(df.labels.unique())
 
     # Split frame into training, validation, and test
-    train_df, test_df = sk_split(df, test_size=0.2)
-    test_df, val_df = sk_split(test_df, test_size=0.2)
+    train_df, test_df = train_test_split(df, test_size=0.2)
+    test_df, val_df = train_test_split(test_df, test_size=0.2)
     assert len(train_df.labels.unique()) == len(df.labels.unique())
 
     weight_dict = None

@@ -1,11 +1,12 @@
 import torch
 from torch.utils.data import Dataset, DataLoader, WeightedRandomSampler
 import pytorch_lightning as pl
+from sklearn import preprocessing
 import numpy as np
 import pandas as pd
 import os
 from abc import ABC
-from ascat import *
+from ascat import ASCAT
 from helpers import get_chr_base_pair_lengths as chr_lengths
 
 pl.seed_everything(42)

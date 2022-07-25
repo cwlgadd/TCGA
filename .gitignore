@@ -223,5 +223,6 @@ cython_debug/
 
 # Cython debug symbols
 
-# Ignore submodule changes
+# Ignore data files
 ASCAT/ascat/ReleasedData/TCGA_SNP6_hg19/segments
+ASCAT/ascat.pkl
