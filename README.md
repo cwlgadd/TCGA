@@ -12,6 +12,6 @@ Package for loading [The Cancer Genome Atlas (TCGA)](https://www.cancer.gov/abou
 
 - [Allele-Specific Copy number Analysis of Tumours (ASCAT)](https://www.crick.ac.uk/research/labs/peter-van-loo/software#:~:text=ASCAT%20is%20a%20tool%20to,variant%2C%20polymorphic%20in%20a%20population.).
   - ASCAT is a tool to detect somatic copy number alterations (CNAs) in cancer samples.
-
+  - When using this module, you will need to unzip the data files.
 
     x

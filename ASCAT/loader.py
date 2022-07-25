@@ -130,9 +130,9 @@ class ASCATDataset(Dataset):
         # Get the relevant label information
         label_info = subject_frame[['cancer_type']].iloc[0][0]
 
-        return {'CNA_sequence': CNA_sequence,
-                'cancer_type': self.label_encoder.transform([label_info]),
-                'label': label_info}
+        return {'feature': CNA_sequence,
+                'label': self.label_encoder.transform([label_info])
+                }
 
     def __init__(self, data: pd.DataFrame, label_encoder, weight_dict: dict = None, custom_df2data=None):
         """
