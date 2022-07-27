@@ -130,9 +130,7 @@ class ASCATDataset(Dataset):
         # Get the relevant label information
         label_info = subject_frame[['cancer_type']].iloc[0][0]
 
-        return {'feature': CNA_sequence,
-                'label': self.label_encoder.transform([label_info])
-                }
+        return torch.Tensor(CNA_sequence), torch.Tensor(self.label_encoder.transform([label_info]))
 
     def __init__(self, data: pd.DataFrame, label_encoder, weight_dict: dict = None, custom_df2data=None):
         """
@@ -178,12 +176,11 @@ def main_test():
         print(f'{key} set\n=============')
 
         for batch_idx, batch in enumerate(loader_list[key]):
-            print(f'\nBatch {key} index {batch_idx}, batch {batch.keys()}')
-
-            print(f"input shape {batch['CNA_sequence'].shape}")
-
-            labels = batch['cancer_type'].numpy()
-            print(f"cancer type counts {np.unique(labels, return_counts=True)}")
+            print(f'\nBatch {key} index {batch_idx}')
+            x, label = batch
+            print(x.shape)
+            print(label.shape)
+            print(f"cancer type counts {np.unique(label, return_counts=True)}")
 
 
 if __name__ == '__main__':

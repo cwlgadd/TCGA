@@ -4,6 +4,8 @@ from sklearn import preprocessing
 from sklearn.model_selection import train_test_split
 import numpy as np
 import pandas as pd
+import os
+
 
 
 class SimulateMarkov:
@@ -33,22 +35,32 @@ class SimulateMarkov:
         # TODO: not implemented
         return np.random.choice([0, 1], size=(self.length,), p=[4. / 5, 1. / 5])
 
-    def __init__(self, classes=2, length=100, n=50000, n_kernels_per=30, n_kernels_shared=20, path=None):
+    def __init__(self, classes=2, channels=2, length=200, n=1000, n_kernels_per=2, n_kernels_shared=1,
+                 path=None):
+        """
+
+        """
         assert n_kernels_shared < n_kernels_per
         self.classes = classes
+        self.strands = 2
+        self.channels = channels
         self.length = length
         self.n = n
         self.n_kernels = n_kernels_per
         self.n_kernels = n_kernels_shared
+        if path is None:
+            path = os.path.dirname(os.path.abspath(__file__))
         self.path = path
 
+        # Create the kernels that are shared between each class
         _shared_kernels = [self.create_insertion_kernel for _ in range(n_kernels_shared)]
+        # Create the kernels that are exclusive to each class (but currently shared across strands + chromosomes)
         self.kernels = [
             [self.create_insertion_kernel for _ in range(n_kernels_per - n_kernels_shared)] + _shared_kernels
             for _ in range(classes)
         ]
 
-        self.trajectories = np.ones((n, 1, length))     # N x T x D
+        self.trajectories = np.ones((n, 1, self.strands, channels, length))     # N x T x D
         self.labels = np.random.choice([i for i in range(classes)],
                                        size=n,
                                        p=[1./classes for _ in range(classes)]
@@ -64,22 +76,37 @@ class SimulateMarkov:
     def __call__(self, steps=1):
         """ Sample through the Markov Process
         """
-        s_t = np.zeros((self.n, steps + 1, self.length))
-        s_t[:, 0, :] = self.trajectories[:, -1, :]
+        s_t = np.zeros((self.n, steps + 1, self.strands, self.channels, self.length))
+        s_t[:, 0, :, :, :] = self.trajectories[:, -1, :, :, :]
 
         # TODO: vectorise
         for step in range(steps):
-            delta = np.zeros_like(self.trajectories[:, -1, :])
-            for label in range(self.classes):
-                next_kernel = \
-                    np.random.choice([i for i in range(len(self.kernels[label]))], size=s_t.shape[0],
-                                     p=[1. / len(self.kernels[label]) for _ in range(len(self.kernels[label]))]
-                                     )
-                for k_ind, kernel in enumerate(self.kernels[label]):
-                    delta[next_kernel == k_ind, :] = np.tile(kernel, (sum(next_kernel == k_ind), 1))
-            s_t[:, step + 1, :] = s_t[:, step, :] + delta
+            print(f"step {step}")
+            delta = np.zeros_like(self.trajectories[:, -1, :, :, :])
 
-        self.trajectories = np.concatenate((self.trajectories, s_t[:, 1:, :]), axis=1)
+            for n in range(self.n):
+                # print(f"sample {n}")
+                for strand in range(self.strands):
+                    for channel in range(self.channels):
+                        kernel_idx = np.random.choice([i for i in range(len(self.kernels[self.labels[n]]))])
+                        kernel = self.kernels[self.labels[n]][kernel_idx]
+                        delta[n, strand, channel, :] += kernel
+            s_t[:, step + 1, :, :, :] = s_t[:, step, :, :, :] + delta
+
+            # delta = np.zeros_like(self.trajectories[:, -1, :, :, :])
+            # for label in range(self.classes):
+            #     next_kernel = \
+            #         np.random.choice([i for i in range(len(self.kernels[label]))],
+            #                          size=(self.n, self.strands, self.channels),
+            #                          p=[1. / len(self.kernels[label]) for _ in range(len(self.kernels[label]))]
+            #                          )
+            #     for k_ind, kernel in enumerate(self.kernels[label]):
+            #         delta[self.labels == label and next_kernel[0] == k_ind,
+            #               next_kernel[1] == k_ind,
+            #               next_kernel[2] == k_ind, :] = 1 #np.tile(kernel, (sum(next_kernel == k_ind), 1))
+            # s_t[:, step + 1, :, :, :] = s_t[:, step, :, :, :] + delta
+
+        self.trajectories = np.concatenate((self.trajectories, s_t[:, 1:, :, :, :]), axis=1)
         return self.trajectories
 
     def make_data_frame(self, load=False):
@@ -93,13 +120,21 @@ class SimulateMarkov:
                 print(f"Could not load pickled dataframe from path {self.path}, creating new...")
 
         # Put into dataframe
-        frame = pd.DataFrame(self.trajectories[:, -1, :], columns=[f'gene{i}' for i in range(self.length)])
+        columns = [f'strand {strand}' for strand in range(self.strands)]
+        a = []
+        for n in range(self.n):
+            A = [[self.trajectories[n, -1, strand, c, :] for c in range(self.channels)] for strand in range(self.strands)]
+            a.append(A)
+
+        frame = pd.DataFrame(a, columns=columns)
+        # print(frame.iloc[0]['nMajor'][0])
+
         frame['labels'] = self.labels
         frame["labels"] = frame["labels"].astype("category")
 
         # Save frame to file_path
         if self.path is not None:
-            pd.to_pickle(frame, self.path)
+            pd.to_pickle(frame, self.path + '/simulatedMarkov.pkl')
 
         return frame
 
@@ -107,12 +142,13 @@ class SimulateMarkov:
 def example_generator():
 
     # Create class instance
-    data_generator = SimulateMarkov()
+    data_generator = SimulateMarkov(n=10000, classes=2, channels=10, n_kernels_per=3, n_kernels_shared=1)
     print(data_generator)
 
     # Run markov process forward
-    chain = data_generator(steps=int(100))
-    print(f"Now we have a trajectory of shape {chain.shape}")
+    chain = data_generator(steps=int(2))
+    print(f"Now we have a trajectory of shape {chain.shape},"
+          f" with dimensions (samples x time steps x strands x channels (chr) x sequence length")
 
     df = data_generator.make_data_frame()
     print(df)
@@ -134,4 +170,3 @@ def example_generator():
 if __name__ == '__main__':
 
     df, (df_train, df_val, df_test), _, le, _ = example_generator()
-    print(df.head())

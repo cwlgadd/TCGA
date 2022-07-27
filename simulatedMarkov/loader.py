@@ -17,8 +17,8 @@ class DataModule(SimulateMarkov, pl.LightningDataModule, ABC):
 
     """
 
-    def __init__(self, steps, classes=2, length=100, n=50000, n_kernels_per=30, n_kernels_shared=20, path=None,
-                 batch_size=128):
+    def __init__(self, steps, classes=2, channels=23, length=100, n=10000, n_kernels_per=30, n_kernels_shared=20,
+                 path=None, batch_size=128):
         """
 
         @param steps:               Number of steps to Markov Chain
@@ -33,6 +33,7 @@ class DataModule(SimulateMarkov, pl.LightningDataModule, ABC):
         super(DataModule, self).__init__()
         SimulateMarkov.__init__(self,
                                 classes=classes,
+                                channels=channels,
                                 length=length,
                                 n=n,
                                 n_kernels_per=n_kernels_per,
@@ -53,9 +54,12 @@ class DataModule(SimulateMarkov, pl.LightningDataModule, ABC):
 
         # Split frame into training, validation, and test
         self.train_df, test_df = train_test_split(data_frame, test_size=0.2)
-        self.test_df, self.val_df = train_test_split(data_frame, test_size=0.2)
+        self.test_df, self.val_df = train_test_split(test_df, test_size=0.5)
 
         self.setup()
+
+    def __str__(self):
+        return str(self.training_set) + str(self.validation_set) + str(self.test_set)
 
     def setup(self, stage=None):
         self.training_set = MarkovDataset(self.train_df, self.label_encoder)
@@ -89,43 +93,48 @@ class DataModule(SimulateMarkov, pl.LightningDataModule, ABC):
 
 class MarkovDataset(Dataset):
 
-    @staticmethod
-    def make_channels(sequence):
-        #TODO: unused
-
-        # Just duplicate for now
-        return np.tile(sequence, (1, 2))
-
     def __init__(self, data: pd.DataFrame, label_encoder):
         """
         """
         self.data_frame = data
         self.label_encoder = label_encoder
 
+        self.n_strands = len(self.data_frame.columns) - 1
+        self.n_channels = len(self.data_frame.iloc[0]['strand 0'])
+        self.seq_length = self.data_frame.iloc[0]['strand 0'][0].shape[0]
+
     def __len__(self):
         return len(self.data_frame.index)
+
+    def __str__(self):
+        s = f"\nsamples: {len(self.data_frame)}, " \
+            f"strands: {self.n_strands}, " \
+            f"channels {self.n_channels}, " \
+            f"seq_length {self.seq_length}"
+        return s
 
     def __getitem__(self, idx):
         if torch.is_tensor(idx):
             idx = idx.tolist()
 
         # Get features
-        filter_col = [col for col in self.data_frame if col.startswith('gene')]      # Get the time point observations
-        feature = self.data_frame.loc[self.data_frame.index[idx], filter_col]        # for next sample
+        feature = np.zeros((self.n_strands, self.n_channels, self.seq_length))
+        for c in range(self.n_channels):
+            for s in range(self.n_strands):
+                feature[s, c, :] = self.data_frame.iloc[idx][f"strand {s}"][c]
 
         # Get label
         label = self.data_frame.loc[self.data_frame.index[idx], ['labels']][0]
         label_enc = list(self.label_encoder.classes_).index(label)
 
-        batch = {"feature": torch.Tensor(feature),
-                 "label": torch.Tensor([label_enc])}
-        return batch
+        return torch.Tensor(feature), torch.Tensor([label_enc])
 
 
-def example_loader(steps=5, batch_size=256):
+def example_loader(steps=2, batch_size=256):
 
-    data_module = DataModule(steps=steps, batch_size=batch_size)
-
+    data_module = DataModule(steps=steps, n=10000, classes=2, channels=10, n_kernels_per=3, n_kernels_shared=1,
+                             batch_size=batch_size)
+    print(data_module)
     loader_list = {'train': data_module.train_dataloader(),
                    'test': data_module.test_dataloader(),
                    'validation': data_module.val_dataloader(),
@@ -134,10 +143,9 @@ def example_loader(steps=5, batch_size=256):
         print(f'\n{key} set\n=============')
         for batch_idx, batch in enumerate(loader_list[key]):
             print(f'\nBatch {key} index {batch_idx}')
-            print(f'Batch {batch.keys()}')
-            print(f"label counts {torch.unique(batch['label'], return_counts=True)}")
-            print(f"input shape {batch['feature'].shape}")   # N x length x regions x num_sequences
-            print(f"output shape {batch['label'].shape}")
+            x, label = batch
+            print(x.shape)
+            print(label.shape)
 
 
 if __name__ == '__main__':
