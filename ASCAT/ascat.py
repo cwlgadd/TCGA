@@ -15,6 +15,10 @@ class ASCAT:
     Class for loading the ascat data
     """
 
+    @property
+    def num_cancer_types(self):
+        return len(self.data_frame['cancer_type'].unique())
+
     def __init__(self, path=None, cancer_types=None, wgd=None):
         self.path = path
         self.filters = {'cancer': cancer_types, 'WGD': wgd}
@@ -144,15 +148,6 @@ class ASCAT:
             unique_samples = len(group.index.unique()) / ntrain_unique_samples
             if unique_samples > 0:
                 weight_dict[cancer_id] = 1 / unique_samples
-
-        # Report any class imbalance
-        # df_dict = {'train frame': train_df, 'validation frame': val_df, 'test frame': test_df}
-        # for key in df_dict:
-        #     assert len(df_dict[key].cancer_type.unique()) == len(cancer_types), f'{key} lost class representation'
-        #     for cancer_id, group in df_dict[key].groupby('cancer_type'):
-        #         unique_samples = len(group['sample'].unique())
-        #         if unique_samples > 0:
-        #             print(f'In {key} there are {unique_samples} samples with cancer type {cancer_id}')
 
         return (train_df, test_df, val_df), weight_dict
 

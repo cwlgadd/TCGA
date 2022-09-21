@@ -1,11 +1,8 @@
-# Methods for loading and parsing the simulated version of the ascat dataset into a dataframe
-#
+# Methods for loading and parsing the simulated version of the ascat dataset into a dataframe.
 from sklearn import preprocessing
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split as sk_split
 import numpy as np
 import pandas as pd
-import os
-
 
 
 class SimulateMarkov:
@@ -13,160 +10,105 @@ class SimulateMarkov:
     Create or load simulated version of ASCAT count number data.
     """
 
-    @property
-    def create_insertion_kernel(self):
+    def make_basis(self):
         """ Sample beginning pos and length of a transition, of all +1
        """
         _max_width = np.min((20, np.floor(2 * self.length / 3)))
 
         delta_state = np.zeros(self.length)
         start = np.random.randint(0, self.length - (_max_width - 1))  # Sample (from 0 to length-5)
-        width = np.random.randint(1, (_max_width + 1))  # Number of elements that change (from 1 to 5)
+        width = np.random.randint(1, (_max_width + 1))  # Number of elements that change (up to _max_width)
         delta_state[start:start + width] += 1
         return delta_state
 
     @property
-    def t(self):
-        return self.trajectories.shape[1]
+    def last_state(self):
+        return self.trajectories[:, -1, :]
 
     @property
-    def noise_kernel(self):
-        """ With some probability we perform a transition that is purely random"""
-        # TODO: not implemented
-        return np.random.choice([0, 1], size=(self.length,), p=[4. / 5, 1. / 5])
+    def frame(self):
+        # Creates a new frame every call, #TODO
+        # This is what is read into the loader
+        d = {'features': list(self.last_state), 'labels': self.labels}
+        return pd.DataFrame(data=d)
 
-    def __init__(self, classes=2, channels=2, length=200, n=1000, n_kernels_per=2, n_kernels_shared=1,
-                 path=None):
-        """
-
-        """
-        assert n_kernels_shared < n_kernels_per
+    def __init__(self, classes=2, length=100, n=50000, n_class_bases=30, n_bases_shared=20, path=None, init_steps=1):
+        assert n_bases_shared < n_class_bases
         self.classes = classes
-        self.strands = 2
-        self.channels = channels
         self.length = length
         self.n = n
-        self.n_kernels = n_kernels_per
-        self.n_kernels = n_kernels_shared
-        if path is None:
-            path = os.path.dirname(os.path.abspath(__file__))
+        self.n_kernels = n_class_bases
+        self.n_kernels = n_bases_shared
         self.path = path
 
-        # Create the kernels that are shared between each class
-        _shared_kernels = [self.create_insertion_kernel for _ in range(n_kernels_shared)]
-        # Create the kernels that are exclusive to each class (but currently shared across strands + chromosomes)
-        self.kernels = [
-            [self.create_insertion_kernel for _ in range(n_kernels_per - n_kernels_shared)] + _shared_kernels
+        # Create the shared kernels/bases
+        _shared_bases = [self.make_basis() for _ in range(n_bases_shared)]
+        # Create the remaining, independent, kernels/bases of each class
+        self.bases = [
+            [self.make_basis() for _ in range(n_class_bases - n_bases_shared)] + _shared_bases
             for _ in range(classes)
         ]
 
-        self.trajectories = np.ones((n, 1, self.strands, channels, length))     # N x T x D
-        self.labels = np.random.choice([i for i in range(classes)],
-                                       size=n,
-                                       p=[1./classes for _ in range(classes)]
-                                       )
+        # Begin all samples at the 1 count at every locus
+        self.trajectories = np.ones((n, 1, length))     # N x T x D
+        # And randomly assign each sample to a different class with equal probability
+        self.labels = np.random.choice([i for i in range(classes)], size=n, p=[1./classes for _ in range(classes)])
+
+        if init_steps > 0:
+            self(init_steps)
 
     def __str__(self):
-        s = ""
-        for idx_c, c in enumerate(self.kernels):
-            s += f"\nClass {idx_c}"
+        s = "SimulateMarkov class summary\n==========================="
+        for idx_c, c in enumerate(self.bases):
+            s += f"\nClass {idx_c} has bases:"
             s += f"\n{np.vstack(c)}"
+
+        combinations = np.unique(self.last_state, axis=0)
+        s += f"\n ... giving (end of trajectory, steps={self.trajectories.shape[1]-1}) " \
+             f"{combinations.shape[0]} combinations:\n{combinations}"
         return s
 
     def __call__(self, steps=1):
         """ Sample through the Markov Process
         """
-        s_t = np.zeros((self.n, steps + 1, self.strands, self.channels, self.length))
-        s_t[:, 0, :, :, :] = self.trajectories[:, -1, :, :, :]
+        s_t = np.zeros((self.n, steps + 1, self.length))
+        s_t[:, 0, :] = self.last_state
 
-        # TODO: vectorise
         for step in range(steps):
-            print(f"step {step}")
-            delta = np.zeros_like(self.trajectories[:, -1, :, :, :])
+            delta = np.zeros_like(self.last_state)
+            for label in range(self.classes):
+                n_basis_in_class = len(self.bases[label])
+                idx_next_basis = np.random.choice([i for i in range(n_basis_in_class)], size=sum(self.labels == label),
+                                                  p=[1. / n_basis_in_class for _ in range(n_basis_in_class)]
+                                                  )
+                delta_class = np.vstack([self.bases[label][idx] for idx in idx_next_basis])
+                delta[self.labels == label] = delta_class
+            s_t[:, step + 1, :] = s_t[:, step, :] + delta
 
-            for n in range(self.n):
-                # print(f"sample {n}")
-                for strand in range(self.strands):
-                    for channel in range(self.channels):
-                        kernel_idx = np.random.choice([i for i in range(len(self.kernels[self.labels[n]]))])
-                        kernel = self.kernels[self.labels[n]][kernel_idx]
-                        delta[n, strand, channel, :] += kernel
-            s_t[:, step + 1, :, :, :] = s_t[:, step, :, :, :] + delta
+        self.trajectories = np.concatenate((self.trajectories, s_t[:, 1:, :]), axis=1)
 
-            # delta = np.zeros_like(self.trajectories[:, -1, :, :, :])
-            # for label in range(self.classes):
-            #     next_kernel = \
-            #         np.random.choice([i for i in range(len(self.kernels[label]))],
-            #                          size=(self.n, self.strands, self.channels),
-            #                          p=[1. / len(self.kernels[label]) for _ in range(len(self.kernels[label]))]
-            #                          )
-            #     for k_ind, kernel in enumerate(self.kernels[label]):
-            #         delta[self.labels == label and next_kernel[0] == k_ind,
-            #               next_kernel[1] == k_ind,
-            #               next_kernel[2] == k_ind, :] = 1 #np.tile(kernel, (sum(next_kernel == k_ind), 1))
-            # s_t[:, step + 1, :, :, :] = s_t[:, step, :, :, :] + delta
-
-        self.trajectories = np.concatenate((self.trajectories, s_t[:, 1:, :, :, :]), axis=1)
         return self.trajectories
 
-    def make_data_frame(self, load=False):
-        """ Store final state in dataframe """
 
-        # Load frame from given file_path
-        if self.path is not None and load is True:
-            try:
-                return pd.read_pickle(self.path)
-            except FileNotFoundError:
-                print(f"Could not load pickled dataframe from path {self.path}, creating new...")
-
-        # Put into dataframe
-        columns = [f'strand {strand}' for strand in range(self.strands)]
-        a = []
-        for n in range(self.n):
-            A = [[self.trajectories[n, -1, strand, c, :] for c in range(self.channels)] for strand in range(self.strands)]
-            a.append(A)
-
-        frame = pd.DataFrame(a, columns=columns)
-        # print(frame.iloc[0]['nMajor'][0])
-
-        frame['labels'] = self.labels
-        frame["labels"] = frame["labels"].astype("category")
-
-        # Save frame to file_path
-        if self.path is not None:
-            pd.to_pickle(frame, self.path + '/simulatedMarkov.pkl')
-
-        return frame
-
-
-def example_generator():
+def debug_generator():
+    # TODO: turn into unit test
 
     # Create class instance
-    data_generator = SimulateMarkov(n=10000, classes=2, channels=10, n_kernels_per=3, n_kernels_shared=1)
-    print(data_generator)
+    data_simulator = SimulateMarkov(length=20, n=10000, n_class_bases=4, n_bases_shared=0, init_steps=1)
+    print(data_simulator)
 
-    # Run markov process forward
-    chain = data_generator(steps=int(2))
-    print(f"Now we have a trajectory of shape {chain.shape},"
-          f" with dimensions (samples x time steps x strands x channels (chr) x sequence length")
-
-    df = data_generator.make_data_frame()
-    print(df)
-
-    # Encode remaining cancer type labels, so they can be used by the model later
+    # Encode labels
     label_encoder = preprocessing.LabelEncoder()
-    label_encoder.fit_transform(df.labels.unique())
+    label_encoder.fit_transform(np.unique(data_simulator.labels, axis=0))
 
     # Split frame into training, validation, and test
-    train_df, test_df = train_test_split(df, test_size=0.2)
-    test_df, val_df = train_test_split(test_df, test_size=0.2)
-    assert len(train_df.labels.unique()) == len(df.labels.unique())
+    train_df, test_df = sk_split(data_simulator.frame, test_size=0.2)
+    test_df, val_df = sk_split(test_df, test_size=0.2)
+    assert len(train_df.labels.unique()) == len(data_simulator.frame.labels.unique())
 
-    weight_dict = None
-
-    return df, (train_df, val_df, test_df), weight_dict, label_encoder, data_generator
+    return data_simulator.frame, (train_df, val_df, test_df), label_encoder, data_simulator
 
 
 if __name__ == '__main__':
 
-    df, (df_train, df_val, df_test), _, le, _ = example_generator()
+    df, (df_train, df_val, df_test), le, ds = debug_generator()

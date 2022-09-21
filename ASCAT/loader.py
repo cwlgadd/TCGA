@@ -1,18 +1,17 @@
 import torch
 from torch.utils.data import Dataset, DataLoader, WeightedRandomSampler
 import pytorch_lightning as pl
-from sklearn import preprocessing
 import numpy as np
 import pandas as pd
 import os
 from abc import ABC
-from .ascat import ASCAT
-from ..helpers import get_chr_base_pair_lengths
+from data.ASCAT.ascat import *
+from data.helpers import get_chr_base_pair_lengths as chr_lengths
 
 pl.seed_everything(42)
 
 
-class DataModule(ASCAT, pl.LightningDataModule, ABC):
+class ASCATDataModule(ASCAT, pl.LightningDataModule, ABC):
     """
 
     """
@@ -28,16 +27,12 @@ class DataModule(ASCAT, pl.LightningDataModule, ABC):
         if file_path is None:
             file_path = os.path.dirname(os.path.abspath(__file__)) + '/ascat.pkl'
 
-        super(DataModule, self).__init__(path=file_path, cancer_types=cancer_types, wgd=wgd)
+        super(ASCATDataModule, self).__init__(path=file_path, cancer_types=cancer_types, wgd=wgd)
 
         self.batch_size = batch_size
         self.train_set, self.test_set, self.validation_set = None, None, None
         self.train_sampler, self.train_shuffle = None, False
-
-        self.label_encoder = preprocessing.LabelEncoder()
-        self.label_encoder.fit_transform(self.data_frame.cancer_type.unique())
-
-        (self.train_df, self.val_df, self.test_df), self.weight_dict = self.train_test_split()
+        self.label_encoder = None
 
         self.setup()
 
@@ -48,6 +43,11 @@ class DataModule(ASCAT, pl.LightningDataModule, ABC):
         @return:
         """
         #
+        self.label_encoder = preprocessing.LabelEncoder()
+        self.label_encoder.fit_transform(self.data_frame.cancer_type.unique())
+
+        (self.train_df, self.val_df, self.test_df), self.weight_dict = self.train_test_split()
+
         self.train_set = ASCATDataset(self.train_df, self.label_encoder, weight_dict=self.weight_dict)
         if self.weight_dict is not None:
             self.train_sampler = WeightedRandomSampler(self.train_set.weights,
@@ -94,10 +94,10 @@ class ASCATDataset(Dataset):
         Helper function to convert collections of (startpos, endpos) into down-sampled sequences. This is called during
         __getitem__ to avoid storing many large vectors.
         """
-        true_chr_lengths = get_chr_base_pair_lengths()
+        true_chr_lengths = chr_lengths()
 
         if equal_chr_length is True:
-            chr_length = 10000
+            chr_length = 1000
 
             CNA_sequence = torch.ones((2, 23, chr_length))
             for row in subject_edge_info.iterrows():
@@ -125,25 +125,33 @@ class ASCATDataset(Dataset):
 
         # Get the columns relevant for the count number sequences
         subject_edge_info = subject_frame[['startpos', 'endpos', 'nMajor', 'nMinor', 'chr']]
-        CNA_sequence = self.edges2seq(subject_edge_info)
+        count_numbers = self.edges2seq(subject_edge_info)
 
-        # Get the relevant label information
-        label_info = subject_frame[['cancer_type']].iloc[0][0]
+        # Get label
+        cancer_name = subject_frame["cancer_type"][0]
+        label = list(self.label_encoder.classes_).index(cancer_name)
+        # label = self.label_encoder.transform([cancer_name])
 
-        return torch.Tensor(CNA_sequence), torch.Tensor(self.label_encoder.transform([label_info]))
+        return {'feature': count_numbers,
+                'label': torch.tensor(label),
+                }
 
-    def __init__(self, data: pd.DataFrame, label_encoder, weight_dict: dict = None, custom_df2data=None):
+    def __init__(self, data: pd.DataFrame, label_encoder, weight_dict: dict = None,
+                 custom_df2data=None, custom_edges2seq=None):
         """
 
         @param data:
         @param label_encoder:
         @param weight_dict:
         @param custom_df2data:           Custom method to wrap the DataLoader output
+        @param custom_edges2seq:         Custom method to wrap for feature output from condensed edge representation
         """
         self.data_frame = data
         self.label_encoder = label_encoder
         if custom_df2data is not None:
             self.df2data = custom_df2data
+        if custom_edges2seq is not None:
+            self.edges2seq = custom_edges2seq
 
         _tmp = self.data_frame.groupby('ID').first()
         self.IDs = [row[0] for row in _tmp.iterrows()]
@@ -160,29 +168,31 @@ class ASCATDataset(Dataset):
         return self.df2data(subject_frame)
 
 
-def main_test():
-    data_module = DataModule(wgd=['0'], cancer_types=['ACC', 'BRCA'])
+def debug_loader():
+    # TODO: turn into unit test
+
+    data_module = ASCATDataModule(wgd=['0'], cancer_types=['ACC', 'BRCA'])
     print(data_module)
     print(data_module.weight_dict)
-
-    le = data_module.label_encoder
-    print(le.classes_)
+    print(data_module.label_encoder.classes_)
 
     loader_list = {'train': data_module.train_dataloader(),
                    'test': data_module.test_dataloader(),
                    'validation': data_module.val_dataloader(),
                    }
     for key in loader_list:
-        print(f'{key} set\n=============')
-
+        print(f'\n{key} set\n=============')
         for batch_idx, batch in enumerate(loader_list[key]):
             print(f'\nBatch {key} index {batch_idx}')
-            x, label = batch
-            print(x.shape)
-            print(label.shape)
-            print(f"cancer type counts {np.unique(label, return_counts=True)}")
+            print(f'Batch {batch.keys()}')
+            print(f"Feature shape {batch['feature'].shape}, label shape {batch['label'].shape}")
+            print(f"label counts {torch.unique(batch['label'], return_counts=True)}")
+            print(np.unique(batch['feature'], axis=0).shape)
+            # for s in range(batch['feature'].shape[0]):
+            #     print(f"input  {batch['feature'][s, 0, 0, :]}")   # N x length x regions x num_sequences
+            #     print(f"output  {batch['label'][s]}")
 
 
 if __name__ == '__main__':
 
-    main_test()
+    debug_loader()
