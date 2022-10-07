@@ -72,7 +72,6 @@ class ASCATDataModule(ASCAT, pl.LightningDataModule, ABC):
             dataset=self.validation_set,
             batch_size=self.batch_size,
             num_workers=os.cpu_count(),
-            shuffle=True
         )
 
     def test_dataloader(self):
