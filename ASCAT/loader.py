@@ -109,7 +109,7 @@ class ASCATDataset(Dataset):
                 # Major strand
                 CNA_sequence[0, chrom-1, start_pos:end_pos] = row[1]['nMajor']
                 # Minor strand
-                CNA_sequence[0, chrom-1, start_pos:end_pos] = row[1]['nMinor']
+                CNA_sequence[1, chrom-1, start_pos:end_pos] = row[1]['nMinor']
 
         else:
             # TODO: Shouldn't assume each chromosome has equal length in models - implement this later
