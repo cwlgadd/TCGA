@@ -16,7 +16,8 @@ class ASCATDataModule(ASCAT, pl.LightningDataModule, ABC):
 
     """
 
-    def __init__(self, batch_size=128, file_path=None, cancer_types=None, wgd=None):
+
+    def __init__(self, batch_size=128, file_path=None, cancer_types=None, wgd=None, custom_edges=None):
         """
 
         @param batch_size:
@@ -30,6 +31,7 @@ class ASCATDataModule(ASCAT, pl.LightningDataModule, ABC):
         super(ASCATDataModule, self).__init__(path=file_path, cancer_types=cancer_types, wgd=wgd)
 
         self.batch_size = batch_size
+        self.edges2 = custom_edges
         self.train_set, self.test_set, self.validation_set = None, None, None
         self.train_sampler, self.train_shuffle = None, False
         self.label_encoder = None
@@ -48,15 +50,15 @@ class ASCATDataModule(ASCAT, pl.LightningDataModule, ABC):
 
         (self.train_df, self.val_df, self.test_df), self.weight_dict = self.train_test_split()
 
-        self.train_set = ASCATDataset(self.train_df, self.label_encoder, weight_dict=self.weight_dict)
+        self.train_set = ASCATDataset(self.train_df, self.label_encoder, weight_dict=self.weight_dict, custom_edges2seq=self.edges2)
         if self.weight_dict is not None:
             self.train_sampler = WeightedRandomSampler(self.train_set.weights,
                                                        len(self.train_set.weights),
                                                        replacement=True)
             self.train_shuffle = False
 
-        self.test_set = ASCATDataset(self.test_df, self.label_encoder)
-        self.validation_set = ASCATDataset(self.val_df, self.label_encoder)
+        self.test_set = ASCATDataset(self.test_df, self.label_encoder, custom_edges2seq=self.edges2)
+        self.validation_set = ASCATDataset(self.val_df, self.label_encoder, custom_edges2seq=self.edges2)
 
     def train_dataloader(self):
         return DataLoader(
@@ -89,6 +91,7 @@ class ASCATDataset(Dataset):
     We keep data in the condensed (startpos, endpos) format for memory efficiency at the cost of some minor overhead.
     """
 
+    # TODO: make property
     def edges2seq(self, subject_edge_info, equal_chr_length=True):
         """
         Helper function to convert collections of (startpos, endpos) into down-sampled sequences. This is called during
@@ -117,6 +120,7 @@ class ASCATDataset(Dataset):
 
         return CNA_sequence
 
+    # TODO: make property
     def df2data(self, subject_frame):
         """
         :return:  x shape (seq_length, num_channels, num_sequences)
