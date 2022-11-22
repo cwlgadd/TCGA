@@ -226,8 +226,8 @@ cython_debug/
 # Cython debug symbols
 
 # Ignore data files
-data_modules/ASCAT/ascat/ReleasedData/TCGA_SNP6_hg19/segments
-data_modules/ASCAT/ascat.pkl
+data_modules/data/ascat/ReleasedData/TCGA_SNP6_hg19/segments
+data_modules/data/ascat.pkl
 
 
 # Covers JetBrains IDEs: IntelliJ, RubyMine, PhpStorm, AppCode, PyCharm, CLion, Android Studio, WebStorm and Rider
