@@ -18,8 +18,9 @@ class SimulateMarkov:
 
     def make_basis(self):
         """ Sample beginning pos and length of a transition, of all +1
-       """
-        _max_width = np.min((20, np.floor(2 * self.length / 3)))
+        """
+        # Maximum width should not exceed 2/3 of length, and should not be lower than
+        _max_width = np.floor(2 * self.length / 3)
 
         delta_state = np.zeros(self.length)
         start = np.random.randint(0, self.length - (_max_width - 1))  # Sample (from 0 to length-5)
