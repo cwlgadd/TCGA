@@ -248,7 +248,7 @@ class ASCATDataset(Dataset):
         true_chr_lengths = chr_lengths()
 
         if equal_chr_length is True:
-            chr_length = 1000
+            chr_length = 100
 
             CNA_sequence = torch.ones((2, 23, chr_length))
             for row in subject_edge_info.iterrows():
