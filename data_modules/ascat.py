@@ -11,6 +11,7 @@ from abc import ABC
 from tqdm import tqdm
 import numpy as np
 import pandas as pd
+import pyarrow.feather as feather
 
 from .utils.helpers import get_chr_base_pair_lengths as chr_lengths
 
@@ -53,18 +54,29 @@ class LoadASCAT:
         pd.to_pickle(self.data_frame, path)
 
     def parse_files(self):
-        """ Convert the numerous released data files into a single, condensed, dataframe so we don't have to load files
+        """ Convert the different data sources into a single condensed dataframe so we don't have to load files
             whilst training our PyTorch model.
+            
+            Sources:
+            	summary.ascatv3TCGA.penalty70.hg19.tsv  : summary data for the ASCAT samples
+            	segments/(.+?).segments.txt             : the CNA obtained via ASCAT
+            	survival_data.feather                   : survival data loaded from R::library(RTCGA) and saved to file
 
-        @return: pandas data frame containing the condensed representation of the ASCAT data (i.e. with start/end pos)
+        @return: pandas data frame containing the condensed representation of the ASCAT data (i.e. with start/end pos).
+        We do not directly convert to sequence data to save memory - this is done upon loading batches in the datamodule.
         """
 
-        # Load in the label information -> patient ID, cancer type, WGD, gi
+        # Load in the label information 
         label_frame = pd.read_csv(self._data_path + r'/summary.ascatv3TCGA.penalty70.hg19.tsv',
                                   delimiter='\t',
                                   index_col='name'
                                   )
-
+        # print(label_frame)
+        
+        # Load in the survival information
+        surv_df = feather.read_feather( os.path.dirname(os.path.abspath(__file__)) + "/survival_data.feather")
+        # print(surv_df)
+                                  
         # Load in the count number data
         all_subjects = []
         # Loop over segments files (each file belongs to one patient)
@@ -76,25 +88,40 @@ class LoadASCAT:
             if (entry.path.endswith(r".segments.txt")) and entry.is_file():
                 try:
                     # Get patient identifier
-                    subject_id = re.search(r'segments/(.+?).segments.txt', entry.path).group(1)
-                    # print(subject_id)
-
-                    # Load segment file
+                    sample_name = re.search(r'segments/(.+?).segments.txt', entry.path).group(1)      # with -a, -b suffixes
+	
+                    # Load segment file corresponding to patient identifier
+                    #      index: "sample_name" with suffix
+                    #      cols: "chr", "startpos", "endpos", "nMajor", "nMinor"
                     sample_frame = pd.read_csv(entry.path, sep='\t', index_col='sample')
-                    assert len(sample_frame.index) > 0, f'Skipping empty segment file {subject_id}'
+                    assert len(sample_frame.index) > 0, f'Skipping empty segment file {sample_name}'
+                    # print(sample_frame)
 
-                    # Find label corresponding to patient identifier
-                    subject_labels = label_frame.loc[[subject_id]]
-                    assert len(subject_labels.index) > 0, f'Skipping empty label file {subject_id}'
+                    # Find labels corresponding to patient identifier
+                    #      index: "sample_name" with suffix        (repeated)
+                    subject_labels = label_frame.loc[[sample_name]]
+                    assert len(subject_labels.index) > 0, f'Skipping empty label file {sample_name}'
                     subject_labels = pd.concat([subject_labels] * len(sample_frame.index))
+                    subject_labels.index.name = 'sample'
+                    # print(subject_labels)
 
-                    subject_df = pd.concat([sample_frame, subject_labels], axis=1)
-                    subject_df.index.name = 'ID'
+                    # Find  survival data corresponding to patient identifier. In case of duplication or double entry, take last.
+                    #      index: "sample_name" with suffix        (repeated)
+                    subject_surv = surv_df.loc[surv_df['bcr_patient_barcode'] == subject_labels['patient'][0]].drop_duplicates()
+                    assert (subject_surv["times"].size > 0) and (subject_surv["patient.vital_status"].size > 0), f"skipping missing survival entry {sample_name}"
+                    assert (subject_surv["times"].size == 1) and (subject_surv["patient.vital_status"].size == 1), f"skipping doubled (non-duplicated) survival entry {sample_name}"
+                    subject_surv["sample"] = sample_name
+                    subject_surv.set_index("sample", inplace=True)
+                    subject_surv = pd.concat([subject_surv] * len(sample_frame.index))
+                    #print(subject_surv)
+                    
+                    subject_df = pd.concat([sample_frame, subject_labels, subject_surv], axis=1)
+                    # print(subject_df)
                     all_subjects.append(subject_df)
 
                 except Exception as e:
                     # Catch empty files
-                    print(f"Error {e}, {e.__class__} occurred.")
+                    print(f"Error: {e}")  #, {e.__class__} occurred.")
                     pass
 
         frame = pd.concat(all_subjects)
@@ -163,6 +190,16 @@ class ASCATDataModule(LoadASCAT, pl.LightningDataModule, ABC):
     """
 
     """
+    
+    def __str__(self):
+        s = "\nASCATDataModule"
+        for df, data_set in zip([self.train_df, self.val_df, self.test_df], ["Train", "Validation", "Test"]):
+            df = df.groupby('sample').first()
+            s += f"\n\t {data_set}"
+            for i, j in zip(df['cancer_type'].value_counts().keys(), df['cancer_type'].value_counts().values):
+                if j > 0:
+                    s += f"\n\t\t {i.ljust(8)}: {j}"
+        return s
 
     def __init__(self, batch_size=128, file_path=None, cancer_types=None, wgd=None, custom_edges=None):
         """
@@ -184,6 +221,7 @@ class ASCATDataModule(LoadASCAT, pl.LightningDataModule, ABC):
         self.label_encoder = None
 
         self.setup()
+        self.W = self.train_set.chr_length
 
     def setup(self, stage=None):
         """
@@ -248,7 +286,7 @@ class ASCATDataset(Dataset):
         true_chr_lengths = chr_lengths()
 
         if equal_chr_length is True:
-            chr_length = 100
+            chr_length = self.chr_length
 
             CNA_sequence = torch.ones((2, 23, chr_length))
             for row in subject_edge_info.iterrows():
@@ -263,7 +301,7 @@ class ASCATDataset(Dataset):
                 CNA_sequence[1, chrom-1, start_pos:end_pos] = row[1]['nMinor']
 
         else:
-            # TODO: Shouldn't assume each chromosome has equal length in models - implement this later
+            # TODO: Above assumes each chromosome has equal length - implement alternative with zero-padding
             raise NotImplementedError
 
         return CNA_sequence
@@ -273,18 +311,27 @@ class ASCATDataset(Dataset):
         :return:  x shape (seq_length, num_channels, num_sequences)
         """
         subject_frame.reset_index(drop=True, inplace=True)
+        # print(subject_frame.columns)
 
-        # Get the columns relevant for the count number sequences
+        # Get the columns relevant for the CNA
         subject_edge_info = subject_frame[['startpos', 'endpos', 'nMajor', 'nMinor', 'chr']]
         count_numbers = self.edges2seq(subject_edge_info)
 
-        # Get label
+        # Get ASCAT labels
         cancer_name = subject_frame["cancer_type"][0]
         label = list(self.label_encoder.classes_).index(cancer_name)
         # label = self.label_encoder.transform([cancer_name])
 
+        # Get Surv labels
+        surv_time = subject_frame["times"][0]
+        surv_status = subject_frame["patient.vital_status"][0] 
+        
+        # print(count_numbers.shape)
+        
         return {'feature': count_numbers,
                 'label': torch.tensor(label),
+                'survival_time': torch.tensor(surv_time),
+                'survival_status': torch.tensor(surv_status),
                 }
 
     def __init__(self, data: pd.DataFrame, label_encoder, weight_dict: dict = None,
@@ -297,12 +344,15 @@ class ASCATDataset(Dataset):
         @param custom_df2data:           Custom method to wrap the DataLoader output
         @param custom_edges2seq:         Custom method to wrap for feature output from condensed edge representation
         """
+        self.chr_length = 256
         self.data_frame = data
         self.label_encoder = label_encoder
+        
+        # custom wrappers
         self.df2data = custom_df2data if custom_df2data is not None else self.default_df2data
         self.edges2seq = custom_edges2seq if custom_edges2seq is not None else self.default_edges2seq
 
-        _tmp = self.data_frame.groupby('ID').first()
+        _tmp = self.data_frame.groupby('sample').first()
         self.IDs = [row[0] for row in _tmp.iterrows()]
         if weight_dict is not None:
             self.weights = [weight_dict[row[1].cancer_type] for row in _tmp.iterrows()]
