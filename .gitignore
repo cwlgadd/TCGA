@@ -226,8 +226,7 @@ cython_debug/
 # Cython debug symbols
 
 # Ignore data files
-data_modules/data/ascat/ReleasedData/TCGA_SNP6_hg19/segments
-data_modules/data/ascat.pkl
+data_modules/ascat/data/ascat/ReleasedData/TCGA_SNP6_hg19/segments
 
 
 # Covers JetBrains IDEs: IntelliJ, RubyMine, PhpStorm, AppCode, PyCharm, CLion, Android Studio, WebStorm and Rider
@@ -307,3 +306,11 @@ fabric.properties
 
 # Android studio 3.1+ serialized cache file
 .idea/caches/build_file_checksums.ser
+/examples/
+/data_modules/rcCAE/data/breast_tissue_E_2k_node_cnv_calls.bed
+/data_modules/rcCAE/data/breast_tissue_E_2k_node_cnv_calls.csv
+/data_modules/CHISEL_S0E/data/calls.csv
+/data_modules/CHISEL_S0E/data/calls.tsv
+/data_modules/CHISEL_S0E/data/mapping.csv
+/data_modules/CHISEL_S0E/data/mapping.tsv
+/data_modules/CHISEL_S0E/data/merged.csv
