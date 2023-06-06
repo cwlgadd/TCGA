@@ -208,13 +208,15 @@ class ASCATDataModule(LoadASCAT, pl.LightningDataModule, ABC):
 
     """
 
-    def __init__(self, batch_size=128, file_path=None, cancer_types=None, wgd=None, custom_edges=None):
+    def __init__(self, batch_size=128, chrom_as_channels=True, file_path=None,
+                 cancer_types=None, wgd=None, custom_edges=None, sampler=False):
         """
 
         @param batch_size:
         @param file_path:
         @param cancer_types:
         @param wgd:
+        @param sampler:     Boolean flag whether we use a weighted random sampler
         """
         if file_path is None:
             file_path = os.path.dirname(os.path.abspath(__file__)) + '/data/ascat.pkl'
@@ -222,13 +224,16 @@ class ASCATDataModule(LoadASCAT, pl.LightningDataModule, ABC):
         super(ASCATDataModule, self).__init__(path=file_path, cancer_types=cancer_types, wgd=wgd)
 
         self.batch_size = batch_size
+        self.chrom_as_channels = chrom_as_channels
         self.edges2 = custom_edges
         self.train_set, self.test_set, self.validation_set = None, None, None
-        self.train_sampler, self.train_shuffle = None, None
+        self.train_sampler, self.train_shuffle = None, True
         self.label_encoder = None
+        self.sampler = sampler
 
         self.setup()
-        self.W = self.train_set.chr_length
+        self.W = self.train_set.chr_length if self.chrom_as_channels else self.train_set.chr_length * 23
+        self.C = 2*23 if self.chrom_as_channels else 2
 
     def __str__(self):
         s = "\nASCATDataModule"
@@ -251,25 +256,30 @@ class ASCATDataModule(LoadASCAT, pl.LightningDataModule, ABC):
         self.label_encoder.fit_transform(self.data_frame.cancer_type.unique())
 
         (self.train_df, self.val_df, self.test_df), self.weight_dict = self.train_test_split()
+        self.weight_dict = self.weight_dict if self.sampler else None
 
         self.train_set = ASCATDataset(self.train_df, self.label_encoder,
+                                      chrom_as_channels=self.chrom_as_channels,
                                       weight_dict=self.weight_dict,
                                       custom_edges2seq=self.edges2)
         if self.weight_dict is not None:
+            print(f"Using weight dictionary")
             self.train_sampler = WeightedRandomSampler(self.train_set.weights,
                                                        len(self.train_set.weights),
                                                        replacement=True)
             self.train_shuffle = False
 
-        self.test_set = ASCATDataset(self.test_df, self.label_encoder, custom_edges2seq=self.edges2)
-        self.validation_set = ASCATDataset(self.val_df, self.label_encoder, custom_edges2seq=self.edges2)
+        self.test_set = ASCATDataset(self.test_df, self.label_encoder, chrom_as_channels=self.chrom_as_channels,
+                                     custom_edges2seq=self.edges2)
+        self.validation_set = ASCATDataset(self.val_df, self.label_encoder, chrom_as_channels=self.chrom_as_channels,
+                                           custom_edges2seq=self.edges2)
 
     def train_dataloader(self):
         return DataLoader(
             sampler=self.train_sampler,
             dataset=self.train_set,
             batch_size=self.batch_size,
-            num_workers=os.cpu_count(),
+            num_workers=np.min((8,os.cpu_count())),
             shuffle=self.train_shuffle
         )
 
@@ -277,14 +287,15 @@ class ASCATDataModule(LoadASCAT, pl.LightningDataModule, ABC):
         return DataLoader(
             dataset=self.validation_set,
             batch_size=self.batch_size,
-            num_workers=os.cpu_count(),
+            num_workers=np.min((8,os.cpu_count())),
         )
 
     def test_dataloader(self):
         return DataLoader(
             dataset=self.test_set,
             batch_size=self.batch_size,
-            num_workers=os.cpu_count()
+            num_workers=np.min((8,os.cpu_count())),
+            shuffle=False
         )
 
 
@@ -321,7 +332,10 @@ class ASCATDataset(Dataset):
             # TODO: Above assumes each chromosome has equal length - implement alternative with zero-padding
             raise NotImplementedError
 
-        return CNA_sequence
+        if self.chrom_as_channels:
+            return CNA_sequence.reshape((-1, chr_length))
+        else:
+            return CNA_sequence.reshape((2, -1))
 
     def default_df2data(self, subject_frame):
         """
@@ -356,7 +370,7 @@ class ASCATDataset(Dataset):
                 'sex': surv_sex,                            
                 }
 
-    def __init__(self, data: pd.DataFrame, label_encoder, weight_dict: dict = None,
+    def __init__(self, data: pd.DataFrame, label_encoder, weight_dict: dict = None, chrom_as_channels=True,
                  custom_df2data=None, custom_edges2seq=None):
         """
 
@@ -369,6 +383,7 @@ class ASCATDataset(Dataset):
         self.chr_length = 256
         self.data_frame = data
         self.label_encoder = label_encoder
+        self.chrom_as_channels = chrom_as_channels
         
         # custom wrappers
         self.df2data = custom_df2data if custom_df2data is not None else self.default_df2data

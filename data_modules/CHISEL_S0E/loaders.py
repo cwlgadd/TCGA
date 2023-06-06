@@ -4,6 +4,9 @@ import torch
 from torch.utils.data import Dataset, DataLoader, WeightedRandomSampler
 from sklearn.preprocessing import StandardScaler
 from sklearn_pandas import DataFrameMapper
+from sklearn.preprocessing import LabelEncoder
+from sklearn.utils.validation import column_or_1d
+
 import pytorch_lightning as pl
 import os
 import re
@@ -33,22 +36,10 @@ class Load:
     def load(self, path):
 
         self.data_frame = pd.read_csv(path, index_col="CELL", usecols=[i for i in range(1,14)])
-        # print(self.data_frame.head())
-        # except:
-        #     raise NotImplementedError
-        #     self.data_frame = pd.read_csv(self.calls_path, usecols=[i for i in range(1,13)], index_col="CELL")
-        #     self.data_frame_clones = pd.read_csv(self.clones_path, index_col="X.CELL", usecols=[i for i in range(1,4)])
-        #
-        #     self.data_frame["clone"] = np.nan
-        #     for sample in list(self.data_frame.index.unique()):
-        #         sample_clone = self.data_frame_clones[self.data_frame_clones.index == sample]["CLONE"][0]
-        #         self.data_frame.loc[self.data_frame.index == sample, "clone"] = sample_clone
-        #         # print(f"{sample} went to clone {sample_clone}")
-        #
-        #     # assert self.data_frame.isnull().values.any() is False
-        #     self.data_frame.to_csv(path)
-        #
-        # #     clone_cols.append(self.data_frame_clones.iloc[self.data_frame_clones.index==row[0]]["CLONE"])
+
+        # Remove cells that werent assigned to a clonal structure (comment out to use all)
+        self.data_frame = self.data_frame[self.data_frame.CLONE != "None"]
+        # self.data_frame.drop(self.data_frame.loc[self.data_frame['CLONE'] == "None"].index, inplace=True)
 
         return
 
@@ -103,8 +94,10 @@ class DataModule(Load, pl.LightningDataModule, ABC):
         @return:
         """
         #
-        self.label_encoder = preprocessing.LabelEncoder()
-        self.label_encoder.fit_transform(self.data_frame.CLONE.unique())
+        self.label_encoder = OrderedLabelEncoder()     #preprocessing.LabelEncoder()
+        label_order = ["Clone5", "Clone63", "Clone156", "Clone172", "Clone199", "Clone241", "None"]
+        # label_order = self.data_frame.CLONE.unique()
+        self.label_encoder.fit_transform(label_order)
 
         (self.train_df, self.val_df, self.test_df), self.weight_dict = self.train_test_split()
 
@@ -171,8 +164,8 @@ class Dataset(Dataset):
 
                 # Copy Number
                 CN_STATE = row[1]['CN_STATE'].split("|")
-                CNA_sequence[0, chrom-1, start_pos:end_pos] = int(CN_STATE[0])
-                CNA_sequence[1, chrom-1, start_pos:end_pos] = int(CN_STATE[1])
+                CNA_sequence[0, chrom-1, start_pos:end_pos] = int(CN_STATE[0])      # np.min((, 5))
+                CNA_sequence[1, chrom-1, start_pos:end_pos] = int(CN_STATE[1])      # np.min((, 5))
 
         else:
             # TODO: Above assumes each chromosome has equal length - implement alternative with zero-padding
@@ -190,12 +183,19 @@ class Dataset(Dataset):
         # Get the count numbers
         count_numbers = self.edges2seq(subject_frame)
 
-        # Get labels
+        # Get clonal labels
         clone = subject_frame["CLONE"][0]
         label = list(self.label_encoder.classes_).index(clone)
 
-        return {'feature': count_numbers ,
-                'label': label,
+        if False:
+            # Stack chromosomes
+            count_numbers = count_numbers.view(count_numbers.size(0), -1)
+        else:
+            # channelise chromosomes
+            count_numbers = count_numbers.view(count_numbers.size(0) * count_numbers.size(1), -1)
+
+        return {'feature': count_numbers,
+                'label': torch.tensor(label),
                 }
 
     def __init__(self, data: pd.DataFrame, label_encoder, weight_dict: dict = None,
@@ -229,3 +229,31 @@ class Dataset(Dataset):
             idx = idx.tolist()
         subject_frame = self.data_frame.loc[[self.IDs[idx]]]
         return self.df2data(subject_frame)
+
+
+# Additional functionality - wrapper for sklearn's label encoder so we can define the class order
+def ordered_encode_python(values, uniques=None, encode=False):
+    # only used in _encode below, see docstring there for details
+    if uniques is None:
+        uniques = list(dict.fromkeys(values))
+        uniques = np.array(uniques, dtype=values.dtype)
+    if encode:
+        table = {val: i for i, val in enumerate(uniques)}
+        try:
+            encoded = np.array([table[v] for v in values])
+        except KeyError as e:
+            raise ValueError("y contains previously unseen labels: %s"
+                             % str(e))
+        return uniques, encoded
+    else:
+        return uniques
+
+class OrderedLabelEncoder(LabelEncoder):
+    def fit(self, y):
+        y = column_or_1d(y, warn=True)
+        self.classes_ = ordered_encode_python(y)
+
+    def fit_transform(self, y):
+        y = column_or_1d(y, warn=True)
+        self.classes_, y = ordered_encode_python(y, encode=True)
+        return y
