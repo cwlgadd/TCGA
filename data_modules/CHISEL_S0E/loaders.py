@@ -58,7 +58,12 @@ class Load:
         #     'Check all labels are represented in training set'
 
         # Random sampler weights
-        weight_dict = None
+        weight_dict = {}
+        ntrain_unique_samples = len(train_df.index.unique())
+        for cancer_id, group in train_df.groupby('CLONE'):
+            unique_samples = len(group.index.unique()) / ntrain_unique_samples
+            if unique_samples > 0:
+                weight_dict[cancer_id] = 1 / unique_samples
 
         return (train_df, test_df, val_df), weight_dict
 
@@ -68,21 +73,27 @@ class DataModule(Load, pl.LightningDataModule, ABC):
 
     """
 
-    def __init__(self, batch_size=128, custom_edges=None):
+    def __init__(self, batch_size=128, chr_length=256, stack=False, custom_edges=None,
+                 sampler=False):
         """
 
-        @param batch_size:
+        @param sampler:
+            Boolean flag whether we use a weighted random sampler
         """
         super(DataModule, self).__init__()
 
         self.batch_size = batch_size
+        self.chr_length = chr_length
+        self.stack = stack
         self.edges2 = custom_edges
         self.train_set, self.test_set, self.validation_set = None, None, None
-        self.train_sampler, self.train_shuffle = None, None
+        self.train_sampler, self.train_shuffle = None, True
         # self.label_encoder = None
+        self.sampler = sampler
 
         self.setup()
-        self.W = self.train_set.chr_length
+        self.W = self.chr_length * 22 if self.stack else self.chr_length
+        self.C = 2 if self.stack else 2 * 22
 
     def __str__(self):
         return "\nCHISEL S0-E DataModule"
@@ -99,20 +110,25 @@ class DataModule(Load, pl.LightningDataModule, ABC):
         # label_order = self.data_frame.CLONE.unique()
         self.label_encoder.fit_transform(label_order)
 
-        (self.train_df, self.val_df, self.test_df), self.weight_dict = self.train_test_split()
+        (self.train_df, self.val_df, self.test_df), weight_dict = self.train_test_split()
+        self.weight_dict = weight_dict if self.sampler else None
 
-        self.train_set = Dataset(self.train_df, self.label_encoder,
+        self.train_set = Dataset(self.train_df, self.label_encoder, self.chr_length,
+                                 stack=self.stack,
                                  weight_dict=self.weight_dict,
                                  custom_edges2seq=self.edges2)
 
-        # if self.weight_dict is not None:
-        #     self.train_sampler = WeightedRandomSampler(self.train_set.weights,
-        #                                                len(self.train_set.weights),
-        #                                                replacement=True)
-        #     self.train_shuffle = False
+        if self.weight_dict is not None:
+            print(f"Using weight dictionary")
+            self.train_sampler = WeightedRandomSampler(self.train_set.weights,
+                                                       len(self.train_set.weights),
+                                                       replacement=True)
+            self.train_shuffle = False
 
-        self.test_set = Dataset(self.test_df, self.label_encoder, custom_edges2seq=self.edges2)
-        self.validation_set = Dataset(self.val_df, self.label_encoder, custom_edges2seq=self.edges2)
+        self.test_set = Dataset(self.test_df, self.label_encoder, self.chr_length,
+                                stack=self.stack, custom_edges2seq=self.edges2)
+        self.validation_set = Dataset(self.val_df, self.label_encoder, self.chr_length,
+                                      stack=self.stack, custom_edges2seq=self.edges2)
 
     def train_dataloader(self):
         return DataLoader(
@@ -173,7 +189,7 @@ class Dataset(Dataset):
 
         return CNA_sequence
 
-    def default_df2data(self, subject_frame):
+    def default_df2data(self, subject_frame, stack):
         """
         :return:  x shape (seq_length, num_channels, num_sequences)
         """
@@ -187,7 +203,7 @@ class Dataset(Dataset):
         clone = subject_frame["CLONE"][0]
         label = list(self.label_encoder.classes_).index(clone)
 
-        if False:
+        if stack:
             # Stack chromosomes
             count_numbers = count_numbers.view(count_numbers.size(0), -1)
         else:
@@ -198,7 +214,7 @@ class Dataset(Dataset):
                 'label': torch.tensor(label),
                 }
 
-    def __init__(self, data: pd.DataFrame, label_encoder, weight_dict: dict = None,
+    def __init__(self, data: pd.DataFrame, label_encoder, chr_length=256, stack=False, weight_dict: dict = None,
                  custom_df2data=None, custom_edges2seq=None):
         """
 
@@ -208,7 +224,8 @@ class Dataset(Dataset):
         @param custom_df2data:           Custom method to wrap the DataLoader output
         @param custom_edges2seq:         Custom method to wrap for feature output from condensed edge representation
         """
-        self.chr_length = 256
+        self.chr_length = chr_length
+        self.stack = stack
         self.data_frame = data
         self.label_encoder = label_encoder
         
@@ -218,8 +235,11 @@ class Dataset(Dataset):
 
         _tmp = self.data_frame.groupby('CELL').first()
         self.IDs = [row[0] for row in _tmp.iterrows()]
-        # if weight_dict is not None:
-        #     self.weights = [weight_dict[row[1].cancer_type] for row in _tmp.iterrows()]
+
+        if weight_dict is not None:
+            # for row in _tmp.iterrows():
+                # print(row)
+            self.weights = [weight_dict[row[1].CLONE] for row in _tmp.iterrows()]
 
     def __len__(self):
         return len(self.IDs)
@@ -228,7 +248,7 @@ class Dataset(Dataset):
         if torch.is_tensor(idx):
             idx = idx.tolist()
         subject_frame = self.data_frame.loc[[self.IDs[idx]]]
-        return self.df2data(subject_frame)
+        return self.df2data(subject_frame, self.stack)
 
 
 # Additional functionality - wrapper for sklearn's label encoder so we can define the class order

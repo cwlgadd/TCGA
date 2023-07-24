@@ -167,9 +167,9 @@ class LoadASCAT:
         return self.data_frame
         
     def standardise_survival(self):
-        all_cols = self.data_frame.columns    
+        all_cols = self.data_frame.columns
         cols_normalize = ['patient.days_since_birth']
-        cols_standardize = ['times']
+        cols_standardize = []  # 'times'
 
         for col in cols_standardize:
             self.data_frame[col] -= self.data_frame[col].min()
@@ -205,18 +205,32 @@ class LoadASCAT:
 
 class ASCATDataModule(LoadASCAT, pl.LightningDataModule, ABC):
     """
+    Cancer types:
 
     """
 
-    def __init__(self, batch_size=128, chrom_as_channels=True, file_path=None,
-                 cancer_types=None, wgd=None, custom_edges=None, sampler=False):
+    def __init__(self, batch_size=128, file_path=None,
+                 chrom_as_channels=True, cancer_types=None, wgd=None,
+                 custom_edges=None, sampler=False):
         """
 
         @param batch_size:
         @param file_path:
+            When first loading from file, individual patient files are condensed to a single file.
+             This is the location of the pickle file data is saved to after this pre-processing step.
+        @param chrom_as_channels:
+            Whether we treat each chromosome as separate channel (True), or stack them along locus position (False)
         @param cancer_types:
+            ['ACC' 'BLCA' 'BRCA' 'CESC' 'CHOL' 'COAD' 'DLBC' 'ESCA' 'GBM' 'HNSC'
+             'KICH' 'KIRC' 'KIRP' 'LAML' 'LGG' 'LIHC' 'LUAD' 'LUSC' 'MESO' 'OV' 'PAAD'
+             'PCPG' 'PRAD' 'READ' 'SARC' 'SKCM' 'STAD' 'TGCT' 'THCA' 'THYM' 'UCEC'
+             'UCS' 'UVM']
         @param wgd:
-        @param sampler:     Boolean flag whether we use a weighted random sampler
+            Filter based on whether WGD has occurred (based on average copy number)
+        @param custom_edges:
+            Optional custom function wrapper for dataloader, for converting start_pos + end_pos CNA to signals
+        @param sampler:
+            Boolean flag whether we use a weighted random sampler
         """
         if file_path is None:
             file_path = os.path.dirname(os.path.abspath(__file__)) + '/data/ascat.pkl'
@@ -255,8 +269,8 @@ class ASCATDataModule(LoadASCAT, pl.LightningDataModule, ABC):
         self.label_encoder = preprocessing.LabelEncoder()
         self.label_encoder.fit_transform(self.data_frame.cancer_type.unique())
 
-        (self.train_df, self.val_df, self.test_df), self.weight_dict = self.train_test_split()
-        self.weight_dict = self.weight_dict if self.sampler else None
+        (self.train_df, self.val_df, self.test_df), weight_dict = self.train_test_split()
+        self.weight_dict = weight_dict if self.sampler else None
 
         self.train_set = ASCATDataset(self.train_df, self.label_encoder,
                                       chrom_as_channels=self.chrom_as_channels,
@@ -357,7 +371,7 @@ class ASCATDataset(Dataset):
         surv_time = subject_frame["times"][0]
         surv_status = subject_frame["patient.vital_status"][0] 
         surv_sex = subject_frame["patient.gender"][0] 
-        surv_age = int(subject_frame["patient.days_since_birth"][0])
+        surv_age = subject_frame["patient.days_since_birth"][0]
         # print(surv_sex)
         # print(surv_age)
         # print(count_numbers.shape)
@@ -367,7 +381,7 @@ class ASCATDataset(Dataset):
                 'survival_time': torch.tensor(surv_time),
                 'survival_status': torch.tensor(surv_status),
                 'days_since_birth': torch.tensor(surv_age),
-                'sex': surv_sex,                            
+                'sex': surv_sex,
                 }
 
     def __init__(self, data: pd.DataFrame, label_encoder, weight_dict: dict = None, chrom_as_channels=True,
