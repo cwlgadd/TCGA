@@ -307,10 +307,16 @@ fabric.properties
 # Android studio 3.1+ serialized cache file
 .idea/caches/build_file_checksums.ser
 /examples/
-/data_modules/rcCAE/data/breast_tissue_E_2k_node_cnv_calls.bed
-/data_modules/rcCAE/data/breast_tissue_E_2k_node_cnv_calls.csv
-/data_modules/CHISEL_S0E/data/calls.csv
-/data_modules/CHISEL_S0E/data/calls.tsv
-/data_modules/CHISEL_S0E/data/mapping.csv
-/data_modules/CHISEL_S0E/data/mapping.tsv
-/data_modules/CHISEL_S0E/data/merged.csv
+
+
+# Datafiles
+*.bed
+*.tsv
+*.csv
+#/data_modules/rcCAE/data/breast_tissue_E_2k_node_cnv_calls.bed
+#/data_modules/rcCAE/data/breast_tissue_E_2k_node_cnv_calls.csv
+#/data_modules/CHISEL_S0E/data/calls.csv
+#/data_modules/CHISEL_S0E/data/calls.tsv
+#/data_modules/CHISEL_S0E/data/mapping.csv
+#/data_modules/CHISEL_S0E/data/mapping.tsv
+#/data_modules/CHISEL_S0E/data/merged.csv

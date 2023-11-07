@@ -15,7 +15,7 @@ import pyarrow.feather as feather
 
 from TCGA.data_modules.utils.helpers import get_chr_base_pair_lengths as chr_lengths
 
-pl.seed_everything(42)
+# pl.seed_everything(42)
 
 
 class Load:

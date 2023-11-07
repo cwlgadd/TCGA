@@ -12,6 +12,7 @@ import re
 from abc import ABC
 from tqdm import tqdm
 import numpy as np
+import random
 import pandas as pd
 import pyarrow.feather as feather
 
@@ -19,6 +20,10 @@ from TCGA.data_modules.utils.helpers import get_chr_base_pair_lengths as chr_len
 
 pl.seed_everything(42)
 
+# def seed_worker(worker_id):
+#     worker_seed = 42  # torch.initial_seed() % 2 ** 32
+#     np.random.seed(worker_seed)
+#     random.seed(worker_seed)
 
 class LoadASCAT:
     """
@@ -162,7 +167,6 @@ class LoadASCAT:
             self.data_frame = self.data_frame[wgd_mask]
 
         assert len(self.data_frame.index) > 0, 'There are no samples with these filter criterion'
-        print(self.data_frame.head())
 
         return self.data_frame
         
@@ -277,6 +281,7 @@ class ASCATDataModule(LoadASCAT, pl.LightningDataModule, ABC):
                                       weight_dict=self.weight_dict,
                                       custom_edges2seq=self.edges2)
         if self.weight_dict is not None:
+            raise NotImplementedError
             print(f"Using weight dictionary")
             self.train_sampler = WeightedRandomSampler(self.train_set.weights,
                                                        len(self.train_set.weights),
@@ -294,7 +299,7 @@ class ASCATDataModule(LoadASCAT, pl.LightningDataModule, ABC):
             dataset=self.train_set,
             batch_size=self.batch_size,
             num_workers=np.min((8,os.cpu_count())),
-            shuffle=self.train_shuffle
+            shuffle=self.train_shuffle,
         )
 
     def val_dataloader(self):
@@ -309,7 +314,7 @@ class ASCATDataModule(LoadASCAT, pl.LightningDataModule, ABC):
             dataset=self.test_set,
             batch_size=self.batch_size,
             num_workers=np.min((8,os.cpu_count())),
-            shuffle=False
+            shuffle=False,
         )
 
 
@@ -338,9 +343,9 @@ class ASCATDataset(Dataset):
                 end_pos = int(np.floor(row[1]['endpos'] / true_chr_lengths[row[1]['chr']] * chr_length))
 
                 # Major strand
-                CNA_sequence[0, chrom-1, start_pos:end_pos] = row[1]['nMajor']
+                CNA_sequence[0, chrom-1, start_pos:end_pos] = row[1]['nMajor'] # np.log1p()
                 # Minor strand
-                CNA_sequence[1, chrom-1, start_pos:end_pos] = row[1]['nMinor']
+                CNA_sequence[1, chrom-1, start_pos:end_pos] = row[1]['nMinor'] # np.log1p()
 
         else:
             # TODO: Above assumes each chromosome has equal length - implement alternative with zero-padding

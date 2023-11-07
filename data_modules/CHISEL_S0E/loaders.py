@@ -18,10 +18,10 @@ import pyarrow.feather as feather
 
 from TCGA.data_modules.utils.helpers import get_chr_base_pair_lengths as chr_lengths
 
-pl.seed_everything(42)
+# pl.seed_everything(42)
 
 
-class Load:
+class LoadCHISEL_S0E:
     """
     Class for loading data.
     """
@@ -68,7 +68,7 @@ class Load:
         return (train_df, test_df, val_df), weight_dict
 
 
-class DataModule(Load, pl.LightningDataModule, ABC):
+class DataModule(pl.LightningDataModule, ABC):
     """
 
     """
@@ -80,23 +80,29 @@ class DataModule(Load, pl.LightningDataModule, ABC):
         @param sampler:
             Boolean flag whether we use a weighted random sampler
         """
-        super(DataModule, self).__init__()
+        super().__init__()
+        self.prepare_data_per_node = False
+        self.train_set, self.test_set, self.validation_set = None, None, None
 
         self.batch_size = batch_size
         self.chr_length = chr_length
         self.stack = stack
         self.edges2 = custom_edges
-        self.train_set, self.test_set, self.validation_set = None, None, None
         self.train_sampler, self.train_shuffle = None, True
-        # self.label_encoder = None
+        # self.label_encoder = None 
         self.sampler = sampler
-
-        self.setup()
         self.W = self.chr_length * 22 if self.stack else self.chr_length
         self.C = 2 if self.stack else 2 * 22
 
+        self.prepare_data()
+        self.setup()
+        
     def __str__(self):
         return "\nCHISEL S0-E DataModule"
+
+    def prepare_data(self, stage=None):
+        self.dataset = LoadCHISEL_S0E()
+
 
     def setup(self, stage=None):
         """
@@ -110,7 +116,7 @@ class DataModule(Load, pl.LightningDataModule, ABC):
         # label_order = self.data_frame.CLONE.unique()
         self.label_encoder.fit_transform(label_order)
 
-        (self.train_df, self.val_df, self.test_df), weight_dict = self.train_test_split()
+        (self.train_df, self.val_df, self.test_df), weight_dict = self.dataset.train_test_split()
         self.weight_dict = weight_dict if self.sampler else None
 
         self.train_set = Dataset(self.train_df, self.label_encoder, self.chr_length,
