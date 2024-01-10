@@ -20,16 +20,12 @@ from TCGA.data_modules.utils.helpers import get_chr_base_pair_lengths as chr_len
 
 pl.seed_everything(42)
 
-# def seed_worker(worker_id):
-#     worker_seed = 42  # torch.initial_seed() % 2 ** 32
-#     np.random.seed(worker_seed)
-#     random.seed(worker_seed)
 
 class LoadASCAT:
     """
     Class for loading and linking the data from various sources.
-    	Loads Count Number Alteration Data from ASCAT package,
-    	 and then links with survival data (pulled from R::bioconductor and saved to .feather format)
+        Loads Count Number Alteration Data from ASCAT package,
+        and then links with survival data (pulled from R::bioconductor and saved to .feather format)
     """
 
     def __init__(self, path=None, cancer_types=None, wgd=None):
@@ -44,7 +40,7 @@ class LoadASCAT:
             self.parse_files()
             if path is not None:
                 self.save(self.path)
-	
+
         # print(self.data_frame.columns)
         self.apply_filter(cancer_types=cancer_types, wgd=wgd)
         self.standardise_survival()
@@ -96,7 +92,7 @@ class LoadASCAT:
                 try:
                     # Get patient identifier
                     sample_name = re.search(r'segments/(.+?).segments.txt', entry.path).group(1)      # with -a, -b suffixes
-	
+
                     # Load segment file corresponding to patient identifier
                     #      index: "sample_name" with suffix
                     #      cols: "chr", "startpos", "endpos", "nMajor", "nMinor"
@@ -183,7 +179,6 @@ class LoadASCAT:
 
         return self.data_frame
 
-
     def train_test_split(self):
         # Split frame into training, validation, and test
         unique_samples = self.data_frame.index.unique()
@@ -207,15 +202,27 @@ class LoadASCAT:
         return (train_df, test_df, val_df), weight_dict
 
 
-class ASCATDataModule(LoadASCAT, pl.LightningDataModule, ABC):
+class ASCATDataModule(pl.LightningDataModule):
     """
     Cancer types:
 
     """
+    train_set, test_set, validation_set = None, None, None
+    train_sampler, train_shuffle = None, True
+    label_encoder = None
 
-    def __init__(self, batch_size=128, file_path=None,
-                 chrom_as_channels=True, cancer_types=None, wgd=None,
-                 custom_edges=None, sampler=False):
+    @property
+    def data_frame(self):
+        return self.ascat.data_frame
+
+    def __init__(self,
+                 batch_size=128,
+                 file_path=None,
+                 chrom_as_channels=True,
+                 cancer_types=None,
+                 wgd=None,
+                 custom_edges=None,
+                 sampler=False):
         """
 
         @param batch_size:
@@ -239,15 +246,17 @@ class ASCATDataModule(LoadASCAT, pl.LightningDataModule, ABC):
         if file_path is None:
             file_path = os.path.dirname(os.path.abspath(__file__)) + '/data/ascat.pkl'
 
-        super(ASCATDataModule, self).__init__(path=file_path, cancer_types=cancer_types, wgd=wgd)
+        super().__init__()
 
         self.batch_size = batch_size
+        self.file_path = file_path
         self.chrom_as_channels = chrom_as_channels
+        self.cancer_types = cancer_types
+        self.wgd = wgd
         self.edges2 = custom_edges
-        self.train_set, self.test_set, self.validation_set = None, None, None
-        self.train_sampler, self.train_shuffle = None, True
-        self.label_encoder = None
         self.sampler = sampler
+
+        self.ascat = LoadASCAT(path=self.file_path, cancer_types=self.cancer_types, wgd=self.wgd)
 
         self.setup()
         self.W = self.train_set.chr_length if self.chrom_as_channels else self.train_set.chr_length * 23
@@ -263,17 +272,15 @@ class ASCATDataModule(LoadASCAT, pl.LightningDataModule, ABC):
                     s += f"\n\t\t {i.ljust(8)}: {j}"
         return s
 
-    def setup(self, stage=None):
-        """
+    def prepare_data(self):
+        pass
 
-        @param stage:
-        @return:
-        """
-        #
+    def setup(self, stage=None):
+
         self.label_encoder = preprocessing.LabelEncoder()
         self.label_encoder.fit_transform(self.data_frame.cancer_type.unique())
 
-        (self.train_df, self.val_df, self.test_df), weight_dict = self.train_test_split()
+        (self.train_df, self.val_df, self.test_df), weight_dict = self.ascat.train_test_split()
         self.weight_dict = weight_dict if self.sampler else None
 
         self.train_set = ASCATDataset(self.train_df, self.label_encoder,

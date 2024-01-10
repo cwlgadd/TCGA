@@ -141,7 +141,7 @@ class DataModule(pl.LightningDataModule, ABC):
             sampler=self.train_sampler,
             dataset=self.train_set,
             batch_size=self.batch_size,
-            num_workers=os.cpu_count(),
+            num_workers=np.min((8,os.cpu_count())),
             shuffle=self.train_shuffle
         )
 
@@ -149,14 +149,14 @@ class DataModule(pl.LightningDataModule, ABC):
         return DataLoader(
             dataset=self.validation_set,
             batch_size=self.batch_size,
-            num_workers=os.cpu_count(),
+            num_workers=np.min((8,os.cpu_count())),
         )
 
     def test_dataloader(self):
         return DataLoader(
             dataset=self.test_set,
             batch_size=self.batch_size,
-            num_workers=os.cpu_count()
+            num_workers=np.min((8,os.cpu_count())),
         )
 
 
