@@ -216,7 +216,7 @@ class Dataset(Dataset):
             # channelise chromosomes
             count_numbers = count_numbers.view(count_numbers.size(0) * count_numbers.size(1), -1)
 
-        return {'feature': count_numbers,
+        return {'CNA': count_numbers,
                 'label': torch.tensor(label),
                 }
 

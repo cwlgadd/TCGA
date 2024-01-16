@@ -18,6 +18,7 @@ import pyarrow.feather as feather
 
 from TCGA.data_modules.utils.helpers import get_chr_base_pair_lengths as chr_lengths
 
+
 pl.seed_everything(42)
 
 
@@ -167,6 +168,7 @@ class LoadASCAT:
         return self.data_frame
         
     def standardise_survival(self):
+        return self.data_frame
         all_cols = self.data_frame.columns
         cols_normalize = ['patient.days_since_birth']
         cols_standardize = []  # 'times'
@@ -214,6 +216,10 @@ class ASCATDataModule(pl.LightningDataModule):
     @property
     def data_frame(self):
         return self.ascat.data_frame
+
+    @property
+    def labels(self):
+        return self.label_encoder.classes_
 
     def __init__(self,
                  batch_size=128,
@@ -377,23 +383,19 @@ class ASCATDataset(Dataset):
         # Get ASCAT labels
         cancer_name = subject_frame["cancer_type"][0]
         label = list(self.label_encoder.classes_).index(cancer_name)
-        # label = self.label_encoder.transform([cancer_name])
 
         # Get Surv labels
         surv_time = subject_frame["times"][0]
         surv_status = subject_frame["patient.vital_status"][0] 
-        surv_sex = subject_frame["patient.gender"][0] 
-        surv_age = subject_frame["patient.days_since_birth"][0]
-        # print(surv_sex)
-        # print(surv_age)
-        # print(count_numbers.shape)
-        
-        return {'feature': count_numbers,
-                'label': torch.tensor(label),
-                'survival_time': torch.tensor(surv_time),
-                'survival_status': torch.tensor(surv_status),
-                'days_since_birth': torch.tensor(surv_age),
-                'sex': surv_sex,
+        gender = torch.tensor(1 if subject_frame["patient.gender"][0] == "male" else 0)
+        surv_age = torch.tensor(subject_frame["patient.days_since_birth"][0])
+        baseline_covariates = torch.stack((surv_age, gender), dim=0)
+
+        return {'covariates': baseline_covariates.float(),
+                'CNA': count_numbers.float(),
+                'label': torch.tensor(label).float(),
+                'survival_time': torch.tensor(surv_time).float() ,
+                'survival_status': torch.tensor(surv_status).float(),
                 }
 
     def __init__(self, data: pd.DataFrame, label_encoder, weight_dict: dict = None, chrom_as_channels=True,
@@ -428,3 +430,17 @@ class ASCATDataset(Dataset):
             idx = idx.tolist()
         subject_frame = self.data_frame.loc[[self.IDs[idx]]]
         return self.df2data(subject_frame)
+
+
+if __name__ == "__main__":
+
+    dm = ASCATDataModule(batch_size=256,
+                         cancer_types=['THCA', 'BRCA', 'OV', 'GBM', 'HNSC'],
+                         chrom_as_channels=True)
+
+    for batch in dm.train_dataloader():
+        for key in batch.keys():
+            print(f"{key}:".ljust(30) + f"{batch[key].shape}")
+        break
+
+    print(torch.mean(batch["covariates"][:, 0]))
