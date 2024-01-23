@@ -1,5 +1,7 @@
 # Methods for loading and parsing the ascat data set into a dataframe
 #
+import copy
+
 from sklearn.model_selection import train_test_split as sk_split
 from sklearn import preprocessing
 import torch
@@ -29,9 +31,8 @@ class LoadASCAT:
         and then links with survival data (pulled from R::bioconductor and saved to .feather format)
     """
 
-    def __init__(self, path=None, cancer_types=None, wgd=None):
+    def __init__(self, path=None, **kwargs):
         self.path = path
-        self.filters = {'cancer': cancer_types, 'WGD': wgd}
         self._data_path = os.path.dirname(os.path.abspath(__file__)) + r'/data/ascat/ReleasedData/TCGA_SNP6_hg19'
 
         try:
@@ -43,11 +44,15 @@ class LoadASCAT:
                 self.save(self.path)
 
         # print(self.data_frame.columns)
-        self.apply_filter(cancer_types=cancer_types, wgd=wgd)
-        self.standardise_survival()
+        self.apply_filter(**kwargs)
+
+        # import matplotlib.pyplot as plt
+        # print(self.data_frame.columns)
+        # plt.hist(self.data_frame["times"].to_numpy())
+        # plt.show()
 
     def __str__(self):
-        s = f'Allele-Specific Copy Number Analysis of Tumors (ASCAT) parser, with filters {self.filters}'
+        s = f'Allele-Specific Copy Number Analysis of Tumors (ASCAT) parser'
         return s
 
     def load(self, path):
@@ -147,12 +152,14 @@ class LoadASCAT:
 
         return frame
 
-    def apply_filter(self, cancer_types=None, wgd=None):
+    def apply_filter(self, cancer_types=None, wgd=None, cna_clip=None):
         """ Apply feature of interest filters
 
         @param cancer_types:     list of cancer type flags to keep
         @param wgd:              list of WGD flags to keep
+        @param cna_clip:         number of deviations from the mean to clip
         """
+
         # Cancer type
         if cancer_types is not None:
             cancer_mask = self.data_frame.cancer_type.isin(cancer_types)
@@ -163,21 +170,14 @@ class LoadASCAT:
             wgd_mask = self.data_frame.WGD.isin(wgd)
             self.data_frame = self.data_frame[wgd_mask]
 
+        # Clip outlier CNA
+        if cna_clip is not None:
+            # print(self.data_frame['nMajor'].std() * cna_clip)
+            # print(self.data_frame['nMinor'].std() * cna_clip)
+            self.data_frame['nMajor'] = self.data_frame['nMajor'].clip(upper=self.data_frame['nMajor'].std() * cna_clip)
+            self.data_frame['nMinor'] = self.data_frame['nMinor'].clip(upper=self.data_frame['nMinor'].std() * cna_clip)
+
         assert len(self.data_frame.index) > 0, 'There are no samples with these filter criterion'
-
-        return self.data_frame
-        
-    def standardise_survival(self):
-        return self.data_frame
-        all_cols = self.data_frame.columns
-        cols_normalize = ['patient.days_since_birth']
-        cols_standardize = []  # 'times'
-
-        for col in cols_standardize:
-            self.data_frame[col] -= self.data_frame[col].min()
-            self.data_frame[col] /= self.data_frame[col].max()
-        for col in cols_normalize:
-            self.data_frame[col] = (self.data_frame[col] - self.data_frame[col].mean()) / self.data_frame[col].std()
 
         return self.data_frame
 
@@ -225,10 +225,9 @@ class ASCATDataModule(pl.LightningDataModule):
                  batch_size=128,
                  file_path=None,
                  chrom_as_channels=True,
-                 cancer_types=None,
-                 wgd=None,
                  custom_edges=None,
-                 sampler=False):
+                 scaler=None,
+                 **kwargs):
         """
 
         @param batch_size:
@@ -257,12 +256,10 @@ class ASCATDataModule(pl.LightningDataModule):
         self.batch_size = batch_size
         self.file_path = file_path
         self.chrom_as_channels = chrom_as_channels
-        self.cancer_types = cancer_types
-        self.wgd = wgd
         self.edges2 = custom_edges
-        self.sampler = sampler
+        self.scaler = scaler
 
-        self.ascat = LoadASCAT(path=self.file_path, cancer_types=self.cancer_types, wgd=self.wgd)
+        self.ascat = LoadASCAT(path=self.file_path, **kwargs)
 
         self.setup()
         self.W = self.train_set.chr_length if self.chrom_as_channels else self.train_set.chr_length * 23
@@ -283,28 +280,50 @@ class ASCATDataModule(pl.LightningDataModule):
 
     def setup(self, stage=None):
 
+        # Create label encoder
         self.label_encoder = preprocessing.LabelEncoder()
         self.label_encoder.fit_transform(self.data_frame.cancer_type.unique())
 
-        (self.train_df, self.val_df, self.test_df), weight_dict = self.ascat.train_test_split()
-        self.weight_dict = weight_dict if self.sampler else None
+        # Get train-test-val splits (this is in a dense form of start/end positions and counts)
+        (self.train_df, self.val_df, self.test_df), _ = self.ascat.train_test_split()
 
-        self.train_set = ASCATDataset(self.train_df, self.label_encoder,
+        # Create training set so we can iterate over it to fit scaler. It must be done this way as we do not store the
+        #   data in its full form to initialise the Dataset with a preprocessing transformation
+        self.train_set = ASCATDataset(self.train_df,
+                                      self.label_encoder,
                                       chrom_as_channels=self.chrom_as_channels,
-                                      weight_dict=self.weight_dict,
                                       custom_edges2seq=self.edges2)
-        if self.weight_dict is not None:
-            raise NotImplementedError
-            print(f"Using weight dictionary")
-            self.train_sampler = WeightedRandomSampler(self.train_set.weights,
-                                                       len(self.train_set.weights),
-                                                       replacement=True)
-            self.train_shuffle = False
 
-        self.test_set = ASCATDataset(self.test_df, self.label_encoder, chrom_as_channels=self.chrom_as_channels,
-                                     custom_edges2seq=self.edges2)
-        self.validation_set = ASCATDataset(self.val_df, self.label_encoder, chrom_as_channels=self.chrom_as_channels,
-                                           custom_edges2seq=self.edges2)
+        # Pre-processing - TODO: this is really inefficient pre-processing, add chunking
+        if self.scaler is not None:
+            min_max_keys = ["survival_time"]
+            other_keys = ["covariates", "CNA"]
+            batch_keys = [_key for _key in next(iter(self.train_set)).keys() if _key in min_max_keys + other_keys]
+            stacked_batches = dict(zip(batch_keys, [[] for _key in batch_keys if _key in min_max_keys + other_keys]))
+            # Stack batches
+            for batch in self.train_set:
+                for _key in batch_keys:
+                    stacked_batches[_key].append(batch[_key])
+            for _key in batch_keys:
+                stacked_batches[_key] = torch.stack(stacked_batches[_key], dim=0)
+            # Train scalers
+            scalers = dict(zip(batch_keys, [copy.copy(self.scaler) if _key in other_keys
+                                            else preprocessing.MinMaxScaler()
+                                            for _key in batch_keys ]))
+            for _key in batch_keys:
+                scalers[_key].fit(stacked_batches[_key].reshape((len(self.train_set), -1)))
+            self.train_set.scaler_dict = scalers
+
+        self.test_set = ASCATDataset(self.test_df,
+                                     self.label_encoder,
+                                     chrom_as_channels=self.chrom_as_channels,
+                                     custom_edges2seq=self.edges2,
+                                     scaler_dict=self.train_set.scaler_dict)
+        self.validation_set = ASCATDataset(self.val_df,
+                                           self.label_encoder,
+                                           chrom_as_channels=self.chrom_as_channels,
+                                           custom_edges2seq=self.edges2,
+                                           scaler_dict=self.train_set.scaler_dict)
 
     def train_dataloader(self):
         return DataLoader(
@@ -312,7 +331,7 @@ class ASCATDataModule(pl.LightningDataModule):
             dataset=self.train_set,
             batch_size=self.batch_size,
             num_workers=np.min((8,os.cpu_count())),
-            shuffle=self.train_shuffle,
+            shuffle=True,
         )
 
     def val_dataloader(self):
@@ -320,6 +339,7 @@ class ASCATDataModule(pl.LightningDataModule):
             dataset=self.validation_set,
             batch_size=self.batch_size,
             num_workers=np.min((8,os.cpu_count())),
+            shuffle=True
         )
 
     def test_dataloader(self):
@@ -386,20 +406,21 @@ class ASCATDataset(Dataset):
 
         # Get Surv labels
         surv_time = subject_frame["times"][0]
-        surv_status = subject_frame["patient.vital_status"][0] 
+        surv_status = subject_frame["patient.vital_status"][0]
+        # Baseline covariates
         gender = torch.tensor(1 if subject_frame["patient.gender"][0] == "male" else 0)
         surv_age = torch.tensor(subject_frame["patient.days_since_birth"][0])
-        baseline_covariates = torch.stack((surv_age, gender), dim=0)
+        baseline_covariates = torch.stack(tensors=(surv_age, gender), dim=0)
 
         return {'covariates': baseline_covariates.float(),
                 'CNA': count_numbers.float(),
                 'label': torch.tensor(label).float(),
-                'survival_time': torch.tensor(surv_time).float() ,
+                'survival_time': torch.tensor(surv_time).float(),
                 'survival_status': torch.tensor(surv_status).float(),
                 }
 
     def __init__(self, data: pd.DataFrame, label_encoder, weight_dict: dict = None, chrom_as_channels=True,
-                 custom_df2data=None, custom_edges2seq=None):
+                 custom_df2data=None, custom_edges2seq=None, scaler_dict=None):
         """
 
         @param data:
@@ -412,6 +433,7 @@ class ASCATDataset(Dataset):
         self.data_frame = data
         self.label_encoder = label_encoder
         self.chrom_as_channels = chrom_as_channels
+        self.scaler_dict = scaler_dict
         
         # custom wrappers
         self.df2data = custom_df2data if custom_df2data is not None else self.default_df2data
@@ -429,18 +451,30 @@ class ASCATDataset(Dataset):
         if torch.is_tensor(idx):
             idx = idx.tolist()
         subject_frame = self.data_frame.loc[[self.IDs[idx]]]
-        return self.df2data(subject_frame)
+        s_frame = self.df2data(subject_frame)
+
+        if self.scaler_dict is not None:
+            for _key in self.scaler_dict.keys():
+                scaled_ = self.scaler_dict[_key].transform(s_frame[_key].numpy().reshape((1, -1)))
+                s_frame[_key] = torch.from_numpy(scaled_.reshape(s_frame[_key].shape))
+
+        return s_frame
 
 
 if __name__ == "__main__":
 
     dm = ASCATDataModule(batch_size=256,
                          cancer_types=['THCA', 'BRCA', 'OV', 'GBM', 'HNSC'],
-                         chrom_as_channels=True)
+                         cna_clip=3,
+                         chrom_as_channels=True,
+                         scaler=preprocessing.MinMaxScaler())
 
-    for batch in dm.train_dataloader():
-        for key in batch.keys():
-            print(f"{key}:".ljust(30) + f"{batch[key].shape}")
-        break
+    for loader in [dm.train_dataloader(), dm.val_dataloader(), dm.test_dataloader()]:
+        for batch in loader:
+            for key in batch.keys():
+                print(f"{key}:".ljust(30) +
+                      f"{batch[key].shape}".ljust(30) +
+                      f"({torch.min(batch[key])}, {torch.max(batch[key])})")
+            break
 
     print(torch.mean(batch["covariates"][:, 0]))
